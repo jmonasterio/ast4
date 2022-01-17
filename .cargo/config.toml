@@ -1,0 +1,6 @@
+# fast compile, but requires nightly for -Zshare
+# enable nightly with: rustup default nightly <-- In the ast4 folder
+
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld.exe"
+rustflags = ["-Zshare-generics=off"]

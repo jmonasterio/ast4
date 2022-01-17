@@ -1,0 +1,25 @@
+[package]
+name = "ast4"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+# See: https://bevy-cheatbook.github.io/features/file-formats.html
+[dependencies]
+bevy = { version = "0.6.0", features = ["dynamic", "jpeg", "bmp", "wav"] }
+
+
+[workspace]
+resolver = "2" # Important! wgpu/Bevy needs this!
+
+
+# See: https://bevy-cheatbook.github.io/pitfalls/performance.html
+
+# Enable only a small amount of optimization in debug mode
+[profile.dev]
+opt-level = 1
+
+# Enable high optimizations for dependencies (incl. Bevy), but not for our code:
+[profile.dev.package."*"]
+opt-level = 3
