@@ -3,7 +3,6 @@ use bevy::{
     core::FixedTimestep,
     prelude::*,
 };
-use num_traits::*;
 
 mod math;
 
@@ -41,30 +40,28 @@ struct RotatorComponent {
 
 impl RotatorComponent {
 
-    pub fn instant_angle_change( &mut self, transform:  & mut Transform, horz: f32, time: Res<Time>) {
+    pub fn snap_to_angle( &mut self, transform:  & mut Transform, horz: f32, time: Res<Time>) {
 
 
         let (_,_,cur_angle) = transform.rotation.to_euler( EulerRot::XYZ);
         if horz != 0.0f32 
         {
-            let dir = horz.signum();
-
-            println!( "horz={}    dir={}   delta_t={}", horz, dir, time.delta_seconds());
-            let angle_to_rotate = dir * self.rotate_speed * time.delta_seconds();
+            // Assume horz is 1.0 or -1.0
+            let angle_to_rotate = horz * self.rotate_speed * time.delta_seconds();
             let target_angle = cur_angle + angle_to_rotate;
-
 
             // create the change in rotation around the Z axis (pointing through the 2d plane of the screen)
             let rotation_delta = Quat::from_rotation_z(angle_to_rotate);
             // update the ship rotation with our rotation delta
             transform.rotation *= rotation_delta;
 
-            // In case we have to stop.
-            let nearest = math::round_to_nearest_multiple(target_angle + dir * self.angle_increment,
+            // In case we have to stop, this will be the snap angle.
+            let nearest = math::round_to_nearest_multiple(target_angle + horz * self.angle_increment,
                 self.angle_increment);
+
+            // Snap to this angle on next frame if button released.
             self.snap_angle = Some( nearest);
 
-            println!("instant inc:{} spd:{} cur: {} to_rotate: {} target: {} instant: {}", self.angle_increment, self.rotate_speed, cur_angle, angle_to_rotate, target_angle, nearest);
 
         }
         else
@@ -72,40 +69,11 @@ impl RotatorComponent {
             match self.snap_angle {
                 Some(  snap_angle) => {
                 
-
-
-                    println!("finish {}", snap_angle);
-
                     transform.rotation = Quat::from_rotation_z(snap_angle);
                     self.snap_angle = None;
 
-                    /*
-                    let mut angle_to_rotate = self.last_dir * self.rotate_speed * time.delta_seconds();
-                    
-                        if( self.last_dir < 0.0f32) 
-                        { 
-                            uf
-                            clamp_min( cur_angle + angle_to_rotate, snap_angle)
-                        }
-                        else {
-                            clamp_max( cur_angle + angle_to_rotate, snap_angle)
-                        };
-
-
-                    // create the change in rotation around the Z axis (pointing through the 2d plane of the screen)
-                    let rotation_delta = Quat::from_rotation_z(angle_to_rotate);
-                    // update the ship rotation with our rotation delta
-                    transform.rotation *= rotation_delta;
-
-                    // Have we reached the stopping point?
-                    if snap_angle == target_angle
-                    {
-                        self.snap_angle = None;
-                    }
-                    */
                 }
                 None => {
-                    println!("none");
                 }
             }
         }
@@ -307,7 +275,7 @@ fn player_system(
     if keyboard_input.pressed(KeyCode::Right) {
         dir += -1.0f32;
     } 
-    rotator.instant_angle_change( &mut transform, dir, time)
+    rotator.snap_to_angle( &mut transform, dir, time)
 
 }
 
