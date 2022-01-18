@@ -95,7 +95,7 @@ struct FrameRateResource {
 
 struct GameStateResource {
     level: u32,
-    nextFreeLifeScore: u64
+    next_free_life_score: u64
 }
 
 fn main() {
@@ -119,7 +119,7 @@ fn main() {
         })
         .insert_resource(GameStateResource {
             level: 0,
-            nextFreeLifeScore: 10000
+            next_free_life_score: 10000
         })
         .insert_resource(ClearColor(Color::rgb(0.0, 0.0, 0.0)))
         .add_startup_system(setup)
