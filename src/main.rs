@@ -1,8 +1,12 @@
 use bevy::{
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin}, //sprite::collide_aabb::{collide, Collision},
-    //core::FixedTimestep,
+    core::FixedTimestep,
     prelude::*,
 };
+use num_traits::*;
+
+mod math;
+
 
 // TODO: Cooler asset loader: https://www.nikl.me/blog/2021/asset-handling-in-bevy-apps/#:~:text=Most%20games%20have%20some%20sort%20of%20loading%20screen,later%20states%20can%20use%20them%20through%20the%20ECS.
 // TODO: Inspector:  https://bevy-cheatbook.github.io/setup/bevy-tools.html
@@ -12,7 +16,7 @@ use bevy::{
 // Component =
 // Entity = Entity
 
-//const TIME_STEP: f32 = 1.0 / 60.0;
+const TIME_STEP: f32 = 1.0 / 60.0;
 const PROJECT: &'static str = "AST4!";
 
 #[derive(Component)]
@@ -23,12 +27,92 @@ struct FrameRateComponent;
 
 #[derive(Component, Default)]
 struct PlayerComponent {
-    pub rotate_speed: f32,
     pub thrust: f32,
-    pub AngleIncrement: f32,
-    pub MaxSpeed: f32,
-    pub PlayerIndex: u8 // Or 1, for 2 players
+    pub max_speed: f32,
+    pub player_index: u8, // Or 1, for 2 players
 }
+
+#[derive(Component, Default)]
+struct RotatorComponent {
+    pub snap_angle: Option<f32>,
+    pub rotate_speed: f32,  //= 150f;
+    pub angle_increment: f32, // = 5.0f;
+}
+
+impl RotatorComponent {
+
+    pub fn instant_angle_change( &mut self, transform:  & mut Transform, horz: f32, time: Res<Time>) {
+
+
+        let (_,_,cur_angle) = transform.rotation.to_euler( EulerRot::XYZ);
+        if horz != 0.0f32 
+        {
+            let dir = horz.signum();
+
+            println!( "horz={}    dir={}   delta_t={}", horz, dir, time.delta_seconds());
+            let angle_to_rotate = dir * self.rotate_speed * time.delta_seconds();
+            let target_angle = cur_angle + angle_to_rotate;
+
+
+            // create the change in rotation around the Z axis (pointing through the 2d plane of the screen)
+            let rotation_delta = Quat::from_rotation_z(angle_to_rotate);
+            // update the ship rotation with our rotation delta
+            transform.rotation *= rotation_delta;
+
+            // In case we have to stop.
+            let nearest = math::round_to_nearest_multiple(target_angle + dir * self.angle_increment,
+                self.angle_increment);
+            self.snap_angle = Some( nearest);
+
+            println!("instant inc:{} spd:{} cur: {} to_rotate: {} target: {} instant: {}", self.angle_increment, self.rotate_speed, cur_angle, angle_to_rotate, target_angle, nearest);
+
+        }
+        else
+        {
+            match self.snap_angle {
+                Some(  snap_angle) => {
+                
+
+
+                    println!("finish {}", snap_angle);
+
+                    transform.rotation = Quat::from_rotation_z(snap_angle);
+                    self.snap_angle = None;
+
+                    /*
+                    let mut angle_to_rotate = self.last_dir * self.rotate_speed * time.delta_seconds();
+                    
+                        if( self.last_dir < 0.0f32) 
+                        { 
+                            uf
+                            clamp_min( cur_angle + angle_to_rotate, snap_angle)
+                        }
+                        else {
+                            clamp_max( cur_angle + angle_to_rotate, snap_angle)
+                        };
+
+
+                    // create the change in rotation around the Z axis (pointing through the 2d plane of the screen)
+                    let rotation_delta = Quat::from_rotation_z(angle_to_rotate);
+                    // update the ship rotation with our rotation delta
+                    transform.rotation *= rotation_delta;
+
+                    // Have we reached the stopping point?
+                    if snap_angle == target_angle
+                    {
+                        self.snap_angle = None;
+                    }
+                    */
+                }
+                None => {
+                    println!("none");
+                }
+            }
+        }
+    }
+
+}
+
 
 //struct GameEntities {
 //    pub game_over_entity: Option<Entity>,
@@ -53,8 +137,8 @@ fn main() {
 
     new_app.
         add_plugins(DefaultPlugins)
-        .add_plugin(LogDiagnosticsPlugin::default())
-        .add_plugin(FrameTimeDiagnosticsPlugin::default())
+        //.add_plugin(LogDiagnosticsPlugin::default())
+        //.add_plugin(FrameTimeDiagnosticsPlugin::default())
         //  .insert_resource(Scoreboard { score: 0 })
         //.insert_resource(GameEntities {
         //    game_over_entity: None,
@@ -71,13 +155,15 @@ fn main() {
         })
         .insert_resource(ClearColor(Color::rgb(0.0, 0.0, 0.0)))
         .add_startup_system(setup)
-        //.add_system_set(
-        //    SystemSet::new()
-        //        .with_run_criteria(FixedTimestep::step(TIME_STEP as f64))
-        //        .with_system(paddle_movement_system)
-        //        .with_system(ball_collision_system)
-        //        .with_system(ball_movement_system),
-        //)
+        .add_system_set(
+            SystemSet::new()
+                .with_run_criteria(FixedTimestep::step(TIME_STEP as f64))
+                //.add_system(game_over_system)
+                .with_system(player_system)
+                //.with_system(paddle_movement_system)
+                //.with_system(ball_collision_system)
+                //.with_system(ball_movement_system),
+        )
         //.add_system(scoreboard_system)
         //.add_system( change_title)
         .insert_resource(WindowDescriptor {
@@ -89,8 +175,6 @@ fn main() {
             ..Default::default()
         })
         .add_system(frame_rate)
-        .add_system(game_over_system)
-        .add_system(player_system)
         .add_system(bevy::input::system::exit_on_esc_system)
         .run();
 }
@@ -130,6 +214,9 @@ fn setup(
     })
     .insert(PlayerComponent {
         ..Default::default()
+    })
+    .insert( RotatorComponent {
+        snap_angle: None, angle_increment: (3.141592654f32/16.0f32), rotate_speed: 4.0f32
     });
 
     commands
@@ -205,13 +292,29 @@ fn setup(
 //     ));
 // }
 
-fn player_system(_: Query<&PlayerComponent>) {
+fn player_system(
+    keyboard_input: Res<Input<KeyCode>>,
+    time: Res<Time>,
+    mut query : Query<(&PlayerComponent,  &mut RotatorComponent, &mut Transform)>) {
     // println!("Player");
+
+    let (player, mut rotator, mut transform) = query.single_mut();
+
+    let mut dir = 0.0f32;
+    if keyboard_input.pressed(KeyCode::Left) {
+        dir += 1.0f32;
+    }
+    if keyboard_input.pressed(KeyCode::Right) {
+        dir += -1.0f32;
+    } 
+    rotator.instant_angle_change( &mut transform, dir, time)
 
 }
 
-fn game_over_system(_: Query<(&Text, &GameOverComponent)>) {
-    // println!("Game over");
+
+fn game_over_system(
+    _: Query<(&Text, &GameOverComponent)>) {
+    println!("Game over");
 }
 
 fn frame_rate(
@@ -237,3 +340,9 @@ fn frame_rate(
 //struct Scoreboard {
 //    score: usize,
 //}
+
+
+#[test]
+fn quat_test() {
+    assert_eq!(2 + 2, 4);
+}

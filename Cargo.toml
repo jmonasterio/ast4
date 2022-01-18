@@ -7,7 +7,9 @@ edition = "2021"
 
 # See: https://bevy-cheatbook.github.io/features/file-formats.html
 [dependencies]
-bevy = { version = "0.6.0", features = ["dynamic", "jpeg", "bmp", "wav"] }
+bevy = { version = "0.6.0", features = ["dynamic", "jpeg", "bmp", "wav"] }  
+#"dynamic" <-- breaks lldb
+num-traits = "0.2.14"
 
 
 [workspace]
