@@ -27,8 +27,28 @@ struct FrameRateComponent;
 #[derive(Component, Default)]
 struct PlayerComponent {
     pub thrust: f32,
-    pub max_speed: f32,
     pub player_index: u8, // Or 1, for 2 players
+    pub friction: f32
+}
+
+#[derive(Component, Default)]
+struct VelocityComponent {
+    pub v : Vec3,
+    pub max_speed: f32 // magnitude.
+}
+
+impl VelocityComponent {
+    pub fn apply_thrust( & mut self, thrust: f32, direction: &Quat, time: & Res<Time>) {
+        let (_,_,angle_radians) =  direction.to_euler(EulerRot::XYZ); 
+        let thrust_vector = thrust * Vec3::new(-f32::sin(angle_radians),f32::cos(angle_radians), 0f32);
+        self.v = self.v + thrust_vector; // * time.delta_seconds();
+        self.v.clamp_length_max( self.max_speed);
+        println!("max_speed: {}  thrust_vectory: {}", self.max_speed, thrust_vector);
+    }
+
+    pub fn apply_friction( & mut self, friction: f32, time: & Time) {
+        self.v *= friction;
+    }
 }
 
 #[derive(Component, Default)]
@@ -40,10 +60,10 @@ struct RotatorComponent {
 
 impl RotatorComponent {
 
-    pub fn snap_to_angle( &mut self, transform:  & mut Transform, horz: f32, time: Res<Time>) {
+    pub fn rotate_to_angle_with_snap( &mut self, transform:  & mut Transform, horz: f32, time: & Res<Time>) {
 
 
-        let (_,_,cur_angle) = transform.rotation.to_euler( EulerRot::XYZ);
+        let (_,_,cur_angle) = transform.rotation.to_euler( EulerRot::XYZ); // cur angle in radians.
         if horz != 0.0f32 
         {
             // Assume horz is 1.0 or -1.0
@@ -56,7 +76,7 @@ impl RotatorComponent {
             transform.rotation *= rotation_delta;
 
             // In case we have to stop, this will be the snap angle.
-            let nearest = math::round_to_nearest_multiple(target_angle + horz * self.angle_increment,
+            let nearest = math::round_to_nearest_multiple(target_angle + horz * self.angle_increment, // tbd: this may be laggy.
                 self.angle_increment);
 
             // Snap to this angle on next frame if button released.
@@ -66,6 +86,7 @@ impl RotatorComponent {
         }
         else
         {
+            // When button released, snap to next angle.
             match self.snap_angle {
                 Some(  snap_angle) => {
                 
@@ -168,7 +189,7 @@ fn setup(
     //let texture_atlas = TextureAtlas::from_grid(texture_handle, Vec2::new(25.0,25.0),1,1);
 
     let texture_atlas_handle = texture_atlases.add(texture_atlas);
-
+    let size = Vec2::new(27.0, 32.0);
     commands
     .spawn_bundle(SpriteSheetBundle {
         texture_atlas: texture_atlas_handle,
@@ -181,10 +202,13 @@ fn setup(
         ..Default::default()
     })
     .insert(PlayerComponent {
-        ..Default::default()
+        thrust: 2.0f32, friction: 0.98f32, player_index: 0
     })
     .insert( RotatorComponent {
         snap_angle: None, angle_increment: (3.141592654f32/16.0f32), rotate_speed: 4.0f32
+    })
+    .insert( VelocityComponent {
+        v: Vec3::new(0f32,0f32,0f32), max_speed: 100.0f32
     });
 
     commands
@@ -263,10 +287,10 @@ fn setup(
 fn player_system(
     keyboard_input: Res<Input<KeyCode>>,
     time: Res<Time>,
-    mut query : Query<(&PlayerComponent,  &mut RotatorComponent, &mut Transform)>) {
+    mut query : Query<(&PlayerComponent,  &mut RotatorComponent, &mut Transform, &mut VelocityComponent)>) {
     // println!("Player");
 
-    let (player, mut rotator, mut transform) = query.single_mut();
+    let (player, mut rotator, mut transform, mut velocity) = query.single_mut();
 
     let mut dir = 0.0f32;
     if keyboard_input.pressed(KeyCode::Left) {
@@ -275,7 +299,56 @@ fn player_system(
     if keyboard_input.pressed(KeyCode::Right) {
         dir += -1.0f32;
     } 
-    rotator.snap_to_angle( &mut transform, dir, time)
+    rotator.rotate_to_angle_with_snap( &mut transform, dir, &time);
+
+    let mut vert = 0.0f32;
+
+    if keyboard_input.pressed( KeyCode::Up) {
+        vert = 1.0f32;
+    }
+    println!("vert={}", vert);
+    // Maybe a thruster component? Or maybe Rotator+Thruster=PlayerMover component.
+    if vert > 0.0f32
+    {
+        // TOo much trouble to implement rigid body like in Unity, so wrote my own.
+        // Assume no friction while accelerating.
+        println!("rotation: {}", transform.rotation);
+        velocity.apply_thrust( player.thrust, &transform.rotation, &time);
+        
+        
+        /*
+        if (_exhaustParticleSystem.isStopped)
+        {
+            _exhaustParticleSystem.loop = true;
+            _exhaustParticleSystem.Play();
+        }
+        if (!_thrustAudioSource.isPlaying)
+        {
+            _thrustAudioSource.loop = true;
+            _thrustAudioSource.Play();
+            Debug.Assert(_thrustAudioSource.isPlaying);
+        }
+        */
+    }
+    else
+    {
+        velocity.apply_friction( player.friction, &time);
+        /* TODO
+        if (_exhaustParticleSystem.isPlaying)
+        {
+            _exhaustParticleSystem.Stop();
+        }
+        if (_thrustAudioSource.isPlaying)
+        {
+            _thrustAudioSource.Stop();
+            Debug.Assert(!_thrustAudioSource.isPlaying);
+        }
+        */
+    }
+    //  Move forward in direction of velocity.
+    println!("vel: {}", velocity.v);
+    transform.translation += velocity.v * time.delta_seconds();
+
 
 }
 
@@ -301,7 +374,6 @@ fn frame_rate(
         let (mut text, _) = query.single_mut();
         text.sections[1].value = format!("{:.1}", fr.fps_last);
 
-        //println!("FPS = {:.2}", fr.fps_last);
     }
 }
 
@@ -309,8 +381,3 @@ fn frame_rate(
 //    score: usize,
 //}
 
-
-#[test]
-fn quat_test() {
-    assert_eq!(2 + 2, 4);
-}

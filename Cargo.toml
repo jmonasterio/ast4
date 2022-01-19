@@ -9,8 +9,7 @@ edition = "2021"
 [dependencies]
 bevy = { version = "0.6.0", features = ["dynamic", "jpeg", "bmp", "wav"] }  
 #"dynamic" <-- breaks lldb
-num-traits = "0.2.14"
-
+#heron = { version = "1.0.1-rc.1", features = ["2d"] }
 
 [workspace]
 resolver = "2" # Important! wgpu/Bevy needs this!
