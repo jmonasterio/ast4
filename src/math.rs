@@ -22,7 +22,7 @@ pub fn move_towards_angle(current: f32, target: f32, max_delta: f32) -> f32 {
 pub fn delta_angle(current: f32, target: f32) -> f32 {
     let mut delta = repeat(target - current, 360.0f32);
     if delta > 180.0f32 {
-        delta -= 360.0f32;
+        delta -= 360.0f32; // This is crap. Bevy is in Radians. TODO.
     }
     return delta;
 }
