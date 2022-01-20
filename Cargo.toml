@@ -13,6 +13,7 @@ bevy = { version = "0.6.0", features = ["dynamic", "jpeg", "bmp", "wav"] }
 bevy_render="0.6.0"
 bevy_window="0.6.0"
 bevy_winit="0.6.0"
+fastrand="1.6.0"
 
 # Dependencies for WASM only.
 #[target.'cfg(target_arch = "wasm32")'.dependencies]

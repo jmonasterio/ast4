@@ -6,6 +6,8 @@ use bevy::{
     prelude::*,
 };
 use bevy_render::camera::{DepthCalculation, ScalingMode, WindowOrigin};
+//use bevy_rng::*;
+
 //use bevy_window::*;
 //use bevy_winit::*;
 mod math;
@@ -37,7 +39,7 @@ struct PlayerComponent {
     pub thrust: f32,
     pub player_index: u8, // Or 1, for 2 players
     pub friction: f32,
-    pub last_hyperspace_time: f64
+    pub last_hyperspace_time: f64,
 }
 
 #[derive(Component, Default)]
@@ -121,8 +123,18 @@ struct GameStateResource {
     next_free_life_score: u64,
 }
 
+
+fn seed_rng() {
+    let start = std::time::SystemTime::now();
+    let since_the_epoch = start
+    .duration_since(std::time::UNIX_EPOCH)
+    .expect("Time went backwards");
+    let in_ms = since_the_epoch.as_secs();
+    fastrand::seed( in_ms as u64);
+}
 fn main() {
-    println!("Hello, world!");
+    
+    seed_rng();
 
     let mut new_app = App::new();
 
@@ -134,11 +146,12 @@ fn main() {
             height: HEIGHT,
             vsync: true,
             cursor_visible: false,
-            // decorations: false, // Hide the white flashing window at atartup, but hides console.
+            decorations: false, // Hide the white flashing window at atartup
             // mode: bevy_window::WindowMode::BorderlessFullscreen,
             ..Default::default()
         })
         .add_plugins(DefaultPlugins)
+        //.add_plugin( RngPlugin)
 
         //.add_plugin( WindowPlugin { ..Default::default()})q
         //.add_plugin(LogDiagnosticsPlugin::default())
@@ -245,7 +258,7 @@ fn setup(
             player_index: 0,
             last_hyperspace_time: 0f64,
         })
-        .insert(Wrapped2dComponent) 
+        .insert(Wrapped2dComponent)
         .insert(RotatorComponent {
             snap_angle: None,
             angle_increment: (3.141592654f32 / 16.0f32),
@@ -332,14 +345,11 @@ fn setup(
 fn wrapped_2d(mut query: Query<(&Wrapped2dComponent, &mut Transform)>) {
     let (_, mut transform) = query.single_mut();
 
-    println!("wrapped2d translation={}", transform.translation);
-
-
     let cam_rect_right: f32 = WIDTH;
     let cam_rect_left: f32 = 0.0f32;
     let cam_rect_top = HEIGHT;
     let cam_rect_bottom = 0.0f32;
-    
+
     if transform.translation.x > cam_rect_right {
         transform.translation.x = cam_rect_left;
     } else if transform.translation.x < cam_rect_left {
@@ -360,11 +370,16 @@ fn player_system(
         &mut RotatorComponent,
         &mut Transform,
         &mut VelocityComponent,
+//        &mut Rng,
     )>,
 ) {
     // println!("Player");
 
-    let (mut player, mut rotator, mut transform, mut velocity) = query.single_mut();
+    let (mut player, mut rotator, 
+        mut transform, 
+        mut velocity,
+    //    rng
+    ) = query.single_mut();
 
     let mut dir = 0.0f32;
     if keyboard_input.pressed(KeyCode::Left) {
@@ -417,16 +432,18 @@ fn player_system(
     //  Move forward in direction of velocity.
     transform.translation += velocity.v * time.delta_seconds();
 
-
-    if keyboard_input.pressed(KeyCode::Space) || keyboard_input.pressed(KeyCode::LControl) || keyboard_input.pressed(KeyCode::RControl) {
+    if keyboard_input.pressed(KeyCode::Space)
+        || keyboard_input.pressed(KeyCode::LControl)
+        || keyboard_input.pressed(KeyCode::RControl)
+    {
         fire_bullet();
     }
 
-    if time.seconds_since_startup() - player.last_hyperspace_time > 1.0f64 { // TBD: make a constant.
+    if time.seconds_since_startup() - player.last_hyperspace_time > 1.0f64 {
+        // TBD: make a constant.
         if keyboard_input.pressed(KeyCode::Return) {
-
-        go_hyperspace();
-        player.last_hyperspace_time = time.seconds_since_startup();
+            transform.translation = make_random_pos(); // Not safe on purpose
+            player.last_hyperspace_time = time.seconds_since_startup();
         }
     }
 }
@@ -435,8 +452,10 @@ fn fire_bullet() {
     println!("fire!")
 }
 
-fn go_hyperspace() {
-    println!("go hyperspace!");
+fn make_random_pos() -> Vec3 {
+    let x = fastrand::f32();
+    let y = fastrand::f32();
+    return Vec3::new(x * WIDTH,y * HEIGHT, 0f32);
 }
 
 fn game_over_system(_: Query<(&Text, &GameOverComponent)>) {
