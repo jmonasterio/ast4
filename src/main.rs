@@ -108,10 +108,6 @@ impl RotatorComponent {
     }
 }
 
-//struct GameEntities {
-//    pub game_over_entity: Option<Entity>,
-//}
-
 struct FrameRateResource {
     pub display_frame_rate: bool,
     pub debug_sinusoidal_frame_rate: bool,
