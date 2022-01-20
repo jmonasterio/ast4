@@ -52,10 +52,6 @@ impl VelocityComponent {
             thrust * Vec3::new(-f32::sin(angle_radians), f32::cos(angle_radians), 0f32);
         self.v = self.v + thrust_vector; // * time.delta_seconds();
         self.v = self.v.clamp_length_max(self.max_speed);
-        println!(
-            "max_speed: {}  thrust_vectory: {}",
-            self.max_speed, thrust_vector
-        );
     }
 
     pub fn apply_friction(&mut self, friction: f32, time: &Time) {
