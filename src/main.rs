@@ -37,6 +37,7 @@ struct PlayerComponent {
     pub thrust: f32,
     pub player_index: u8, // Or 1, for 2 players
     pub friction: f32,
+    pub last_hyperspace_time: f64
 }
 
 #[derive(Component, Default)]
@@ -242,6 +243,7 @@ fn setup(
             thrust: 2.0f32,
             friction: 0.98f32,
             player_index: 0,
+            last_hyperspace_time: 0f64,
         })
         .insert(Wrapped2dComponent) 
         .insert(RotatorComponent {
@@ -354,7 +356,7 @@ fn player_system(
     keyboard_input: Res<Input<KeyCode>>,
     time: Res<Time>,
     mut query: Query<(
-        &PlayerComponent,
+        &mut PlayerComponent,
         &mut RotatorComponent,
         &mut Transform,
         &mut VelocityComponent,
@@ -362,7 +364,7 @@ fn player_system(
 ) {
     // println!("Player");
 
-    let (player, mut rotator, mut transform, mut velocity) = query.single_mut();
+    let (mut player, mut rotator, mut transform, mut velocity) = query.single_mut();
 
     let mut dir = 0.0f32;
     if keyboard_input.pressed(KeyCode::Left) {
@@ -415,6 +417,26 @@ fn player_system(
     //  Move forward in direction of velocity.
     transform.translation += velocity.v * time.delta_seconds();
 
+
+    if keyboard_input.pressed(KeyCode::Space) || keyboard_input.pressed(KeyCode::LControl) || keyboard_input.pressed(KeyCode::RControl) {
+        fire_bullet();
+    }
+
+    if time.seconds_since_startup() - player.last_hyperspace_time > 1.0f64 { // TBD: make a constant.
+        if keyboard_input.pressed(KeyCode::Return) {
+
+        go_hyperspace();
+        player.last_hyperspace_time = time.seconds_since_startup();
+        }
+    }
+}
+
+fn fire_bullet() {
+    println!("fire!")
+}
+
+fn go_hyperspace() {
+    println!("go hyperspace!");
 }
 
 fn game_over_system(_: Query<(&Text, &GameOverComponent)>) {
