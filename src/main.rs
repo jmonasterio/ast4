@@ -6,8 +6,7 @@ use bevy::{
     core::FixedTimestep,
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin}, //sprite::collide_aabb::{collide, Collision},
     prelude::*,
-//    math::Vec3,
-
+    //    math::Vec3,
 };
 use bevy_render::camera::{DepthCalculation, ScalingMode, WindowOrigin};
 //use bevy_rng::*;
@@ -22,11 +21,13 @@ mod math;
 // Terminology differences from UNITY to BEVY:
 
 // BEVY     UNITY
-// Resource = Prefab
+// Bundle = Prefab
 // System = Behavior
 // Component = Component
 // Entity = Entity
 // Spawn = Instantiate
+// Despawn = Destroy
+// Resource = Singleton
 
 const TIME_STEP: f32 = 1.0 / 60.0;
 const PROJECT: &'static str = "AST4!";
@@ -52,7 +53,7 @@ struct PlayerComponent {
 
 enum BulletSource {
     Player,
-    Alient
+    Alient,
 }
 
 #[derive(Component)]
@@ -60,12 +61,24 @@ struct BulletComponent {
     source: BulletSource,
 }
 
+#[derive(Component)]
+struct AutoDestroyComponent {
+    when: std::time::Instant,
+    enabled: bool,
+}
 
+impl AutoDestroyComponent {
+    pub fn destroy_in(&mut self, d: std::time::Duration) {
+        self.when = std::time::Instant::now() + d;
+    }
+}
+
+// TODO: will we really use this on the alien? Maybe max_bullets should just be on the shooter.
 // Any entity that can shoot a bullet should have one of these to manage their bullets.
 #[derive(Component)]
-struct BulletContainer {
-    pub max_bullets: usize,
-    pub bullet_entities: Vec<Entity>
+struct ShooterComponent {
+    pub max_bullets: u8,
+    pub bullet_speed: f32
 }
 
 #[derive(Component, Default)]
@@ -150,23 +163,21 @@ struct GameStateResource {
 }
 
 #[derive(Default, Clone)]
-struct TexturesResource<> {
+struct TexturesResource {
     texture_atlas_handle: Handle<TextureAtlas>,
     player_index: usize,
-    bullet_index: usize
+    bullet_index: usize,
 }
-
 
 fn seed_rng() {
     let start = std::time::SystemTime::now();
     let since_the_epoch = start
-    .duration_since(std::time::UNIX_EPOCH)
-    .expect("Time went backwards");
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("Time went backwards");
     let in_ms = since_the_epoch.as_secs();
-    fastrand::seed( in_ms as u64);
+    fastrand::seed(in_ms as u64);
 }
 fn main() {
-    
     seed_rng();
 
     let mut new_app = App::new();
@@ -213,6 +224,8 @@ fn main() {
                 //.add_system(game_over_system)
                 .with_system(player_system)
                 .with_system(wrapped_2d)
+                .with_system(auto_destroy_system)
+                .with_system(velocity_system) 
                 //.with_system(paddle_movement_system)
                 //.with_system(ball_collision_system)
                 //.with_system(ball_movement_system),
@@ -248,7 +261,7 @@ fn setup<'a>(
     asset_server: Res<AssetServer>,
     mut texture_atlases: ResMut<Assets<TextureAtlas>>,
     mut windows: ResMut<Windows>, //,   mut game_entities: ResMut<GameEntities>,
-    mut textures_resource: ResMut<TexturesResource>
+    mut textures_resource: ResMut<TexturesResource>,
 ) {
     // hot reloading of assets.
     asset_server.watch_for_changes().unwrap();
@@ -290,7 +303,7 @@ fn setup<'a>(
     commands
         .spawn_bundle(SpriteSheetBundle {
             texture_atlas: textures_resource.texture_atlas_handle.clone(), // TODO: Do I really need this?
-            sprite: TextureAtlasSprite::new( textures_resource.player_index),
+            sprite: TextureAtlasSprite::new(textures_resource.player_index),
             transform: Transform {
                 scale: Vec3::splat(1.0),
                 translation: Vec3::new(50.0, 50.0, 0.0),
@@ -314,10 +327,7 @@ fn setup<'a>(
             v: Vec3::new(0f32, 0f32, 0f32),
             max_speed: 300.0f32,
         })
-        .insert( BulletContainer {
-            max_bullets: 4,
-            bullet_entities: Vec::new(),
-        });
+        .insert(ShooterComponent { max_bullets: 4, bullet_speed: 400.0f32 });
 
     commands
         .spawn_bundle(TextBundle {
@@ -392,28 +402,44 @@ fn setup<'a>(
 //     ));
 // }
 
-fn wrapped_2d( mut query: Query<(&PlayerComponent,&Wrapped2dComponent, &mut Transform)>) {
-    let (_, _, mut transform) = query.single_mut(); // TODO: Won't work for bullets yet, because single_mut
+fn wrapped_2d(mut query: Query<( &Wrapped2dComponent, &mut Transform)>) {
 
     let cam_rect_right: f32 = WIDTH;
     let cam_rect_left: f32 = 0.0f32;
     let cam_rect_top = HEIGHT;
     let cam_rect_bottom = 0.0f32;
 
-    if transform.translation.x > cam_rect_right {
-        transform.translation.x = cam_rect_left;
-    } else if transform.translation.x < cam_rect_left {
-        transform.translation.x = cam_rect_right;
+    for ( ( _, mut transform)) in query.iter_mut() {
+
+        if transform.translation.x > cam_rect_right {
+            transform.translation.x = cam_rect_left;
+        } else if transform.translation.x < cam_rect_left {
+            transform.translation.x = cam_rect_right;
+        }
+        if transform.translation.y > cam_rect_top {
+            transform.translation.y = cam_rect_bottom;
+        } else if transform.translation.y < cam_rect_bottom {
+            transform.translation.y = cam_rect_top;
+        }
     }
-    if transform.translation.y > cam_rect_top {
-        transform.translation.y = cam_rect_bottom;
-    } else if transform.translation.y < cam_rect_bottom {
-        transform.translation.y = cam_rect_top;
+}
+
+// TODO: Make this work in debugger by actually count time.
+fn auto_destroy_system(mut commands: Commands, query: Query<(Entity, &mut AutoDestroyComponent)>) {
+    let now = std::time::Instant::now();
+
+    let mut iter = query.iter();
+    for (ee, ad) in &mut iter {
+        if ad.enabled {
+            if now > ad.when {
+                commands.entity(ee).despawn_recursive();
+            }
+        }
     }
 }
 
 fn player_system(
-    commands: Commands,
+    mut commands: Commands,
     keyboard_input: Res<Input<KeyCode>>,
     textures: Res<TexturesResource>,
     time: Res<Time>,
@@ -422,18 +448,19 @@ fn player_system(
         &mut RotatorComponent,
         &mut Transform,
         &mut VelocityComponent,
-        &mut BulletContainer,
-//        &mut Rng,
+        &mut ShooterComponent,
+        //        &mut Rng,
     )>,
+    bulletQuery: Query<(&BulletComponent)>
 ) {
     // println!("Player");
 
-    let (mut player, 
-        mut rotator, 
-        mut transform, 
+    let (
+        mut player,
+        mut rotator,
+        mut transform,
         mut velocity,
-        mut bulletContainer
-    //    rng
+        mut shooter, //    rng
     ) = query.single_mut();
 
     let mut dir = 0.0f32;
@@ -454,7 +481,6 @@ fn player_system(
     if vert > 0.0f32 {
         // TOo much trouble to implement rigid body like in Unity, so wrote my own.
         // Assume no friction while accelerating.
-        println!("rotation: {}", transform.rotation);
         velocity.apply_thrust(player.thrust, &transform.rotation, &time);
 
         /*
@@ -484,14 +510,27 @@ fn player_system(
         }
         */
     }
-    //  Move forward in direction of velocity.
-    transform.translation += velocity.v * time.delta_seconds();
+
 
     if keyboard_input.just_pressed(KeyCode::Space)
         || keyboard_input.just_pressed(KeyCode::LControl)
         || keyboard_input.just_pressed(KeyCode::RControl)
     {
-        fire_bullet_from_player(textures, transform.as_ref(), &velocity.v, commands, bulletContainer.as_mut());
+
+        let mut count = 0;
+        bulletQuery.for_each( |_| { count+=1} );
+        if count < shooter.max_bullets {
+    
+
+            fire_bullet_from_player(
+            textures,
+            transform.as_ref(),
+            &velocity.v,
+            &mut commands,
+            &shooter
+            );
+        }
+    
     }
 
     if time.seconds_since_startup() - player.last_hyperspace_time > 1.0f64 {
@@ -503,50 +542,74 @@ fn player_system(
     }
 }
 
+
+fn velocity_system(     time: Res<Time>,
+    mut query: Query<( &mut Transform, &VelocityComponent)>) {
+
+    for ( mut transform, velocity) in query.iter_mut() {
+        //  Move forward in direction of velocity.
+        transform.as_mut().translation += velocity.v * time.delta_seconds();
+    }
+
+}
+
 // TBD: If this were inside
-fn fire_bullet_from_player( textures: Res<TexturesResource>, playerTransform: &Transform, playerVelocity: &Vec3, mut commands: Commands, bc: & mut BulletContainer ) {
-    println!("fire!");
-    
-            if bc.bullet_entities.len() <= bc.max_bullets
-            {
-                let bullet_id = commands.spawn_bundle(SpriteSheetBundle {
-                    texture_atlas: textures.texture_atlas_handle.clone(), // TODO: is this really good?
-                    sprite: TextureAtlasSprite::new(textures.bullet_index),
-                    transform: Transform {
-                        scale: Vec3::splat(1.0),
-                        translation: playerTransform.translation.clone(), // TODO: This needs to be muzzle-child position.
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                })
-                .insert(BulletComponent {
-                    source: BulletSource::Player
-                })
-                .insert(VelocityComponent {
-                    v: playerVelocity.mul( 1.4f32),
-                    max_speed: 5000.0f32
-                })
-                .insert(Wrapped2dComponent {
-                }).id();
+fn fire_bullet_from_player(
+    textures: Res<TexturesResource>,
+    playerTransform: &Transform,
+    playerVelocity: &Vec3,
+    commands: &mut Commands,
+    shooter: &ShooterComponent
+) {
 
-                bc.bullet_entities.push( bullet_id);
+    commands
+        .spawn_bundle(SpriteSheetBundle {
+            texture_atlas: textures.texture_atlas_handle.clone(), // TODO: is this really good?
+            sprite: TextureAtlasSprite::new(textures.bullet_index),
+            transform: Transform {
+                scale: Vec3::splat(1.0),
+                translation: playerTransform.translation.clone(), // TODO: This needs to be muzzle-child position.
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .insert(BulletComponent {
+            source: BulletSource::Player,
+        })
+        .insert(VelocityComponent {
+            v: calc_player_normalized_pointing_dir(playerTransform).mul(shooter.bullet_speed),
+            max_speed: 5000.0f32,
+        })
+        .insert(Wrapped2dComponent {})
+        .insert(AutoDestroyComponent {
+            enabled: true,
+            when: std::time::Instant::now() + std::time::Duration::new(1u64, 0),
+        });
 
-                //TODO:
+    //TODO:
 
-                //newBullet.transform.position = MuzzleChild.transform.position;
-                //newBullet.transform.rotation = this.transform.rotation;
-                //newBullet.GetComponent<Rigidbody2D>().AddRelativeForce(Vector2.up*1.4f, ForceMode2D.Impulse);
-                //newBullet.gameObject.SetActive(true);
-    
-                // GameManager.Instance.PlayClip(ShootSound);
-                // Destroy(newBullet.gameObject, 1.4f);
-        }
+    //newBullet.transform.position = MuzzleChild.transform.position;
+    //newBullet.transform.rotation = this.transform.rotation;
+    //newBullet.GetComponent<Rigidbody2D>().AddRelativeForce(Vector2.up*1.4f, ForceMode2D.Impulse);
+    //newBullet.gameObject.SetActive(true);
+
+    // GameManager.Instance.PlayClip(ShootSound);
+    // Destroy(newBullet.gameObject, 1.4f);
+}
+
+fn calc_player_normalized_pointing_dir( p: &Transform ) -> Vec3 {
+
+    let (_, _, angle_radians) = p.rotation.to_euler(EulerRot::XYZ);
+    let dir_vector = Vec3::new(-f32::sin(angle_radians), f32::cos(angle_radians), 0f32);
+
+
+    return dir_vector;
 }
 
 fn make_random_pos() -> Vec3 {
     let x = fastrand::f32();
     let y = fastrand::f32();
-    return Vec3::new(x * WIDTH,y * HEIGHT, 0f32);
+    return Vec3::new(x * WIDTH, y * HEIGHT, 0f32);
 }
 
 fn game_over_system(_: Query<(&Text, &GameOverComponent)>) {
