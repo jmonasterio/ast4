@@ -1,9 +1,13 @@
 //#![windows_subsystem = "windows"] // Remove comment to turn off console log output
 
+use std::ops::Mul;
+
 use bevy::{
     core::FixedTimestep,
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin}, //sprite::collide_aabb::{collide, Collision},
     prelude::*,
+//    math::Vec3,
+
 };
 use bevy_render::camera::{DepthCalculation, ScalingMode, WindowOrigin};
 //use bevy_rng::*;
@@ -15,10 +19,14 @@ mod math;
 // TODO: Cooler asset loader: https://www.nikl.me/blog/2021/asset-handling-in-bevy-apps/#:~:text=Most%20games%20have%20some%20sort%20of%20loading%20screen,later%20states%20can%20use%20them%20through%20the%20ECS.
 // TODO: Inspector:  https://bevy-cheatbook.github.io/setup/bevy-tools.html
 
+// Terminology differences from UNITY to BEVY:
+
+// BEVY     UNITY
 // Resource = Prefab
 // System = Behavior
 // Component = Component
 // Entity = Entity
+// Spawn = Instantiate
 
 const TIME_STEP: f32 = 1.0 / 60.0;
 const PROJECT: &'static str = "AST4!";
@@ -40,6 +48,24 @@ struct PlayerComponent {
     pub player_index: u8, // Or 1, for 2 players
     pub friction: f32,
     pub last_hyperspace_time: f64,
+}
+
+enum BulletSource {
+    Player,
+    Alient
+}
+
+#[derive(Component)]
+struct BulletComponent {
+    source: BulletSource,
+}
+
+
+// Any entity that can shoot a bullet should have one of these to manage their bullets.
+#[derive(Component)]
+struct BulletContainer {
+    pub max_bullets: usize,
+    pub bullet_entities: Vec<Entity>
 }
 
 #[derive(Component, Default)]
@@ -123,6 +149,13 @@ struct GameStateResource {
     next_free_life_score: u64,
 }
 
+#[derive(Default, Clone)]
+struct TexturesResource<> {
+    texture_atlas_handle: Handle<TextureAtlas>,
+    player_index: usize,
+    bullet_index: usize
+}
+
 
 fn seed_rng() {
     let start = std::time::SystemTime::now();
@@ -170,6 +203,9 @@ fn main() {
             level: 0,
             next_free_life_score: 10000
         })
+        .insert_resource( TexturesResource {
+            ..Default::default()
+        })
         .add_startup_system(setup)
         .add_system_set(
             SystemSet::new()
@@ -207,11 +243,12 @@ pub fn new_camera_2d() -> OrthographicCameraBundle {
     return camera;
 }
 
-fn setup(
+fn setup<'a>(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut texture_atlases: ResMut<Assets<TextureAtlas>>,
     mut windows: ResMut<Windows>, //,   mut game_entities: ResMut<GameEntities>,
+    mut textures_resource: ResMut<TexturesResource>
 ) {
     // hot reloading of assets.
     asset_server.watch_for_changes().unwrap();
@@ -230,21 +267,30 @@ fn setup(
 
     let texture_handle = asset_server.load("textures/Atlas.png");
     let mut texture_atlas = TextureAtlas::new_empty(texture_handle, Vec2::new(128.0, 128.0));
-    TextureAtlas::add_texture(
+    textures_resource.player_index = TextureAtlas::add_texture(
         &mut texture_atlas,
         bevy::sprite::Rect {
             min: Vec2::new(2.0, 2.0),
             max: Vec2::new(27.0, 32.0),
         },
     );
+    textures_resource.bullet_index = TextureAtlas::add_texture(
+        &mut texture_atlas,
+        bevy::sprite::Rect {
+            min: Vec2::new(9.0, 40.0),
+            max: Vec2::new(15.0, 46.0), // TODO
+        },
+    );
     //let texture_atlas = TextureAtlas::from_grid(texture_handle, Vec2::new(25.0,25.0),1,1);
 
-    let texture_atlas_handle = texture_atlases.add(texture_atlas);
-    let size = Vec2::new(27.0, 32.0);
+    // Save for later.
+    let ttad = texture_atlases.add(texture_atlas);
+    textures_resource.texture_atlas_handle = ttad.clone();
+
     commands
         .spawn_bundle(SpriteSheetBundle {
-            texture_atlas: texture_atlas_handle,
-            sprite: TextureAtlasSprite::new(0),
+            texture_atlas: textures_resource.texture_atlas_handle.clone(), // TODO: Do I really need this?
+            sprite: TextureAtlasSprite::new( textures_resource.player_index),
             transform: Transform {
                 scale: Vec3::splat(1.0),
                 translation: Vec3::new(50.0, 50.0, 0.0),
@@ -267,6 +313,10 @@ fn setup(
         .insert(VelocityComponent {
             v: Vec3::new(0f32, 0f32, 0f32),
             max_speed: 300.0f32,
+        })
+        .insert( BulletContainer {
+            max_bullets: 4,
+            bullet_entities: Vec::new(),
         });
 
     commands
@@ -342,8 +392,8 @@ fn setup(
 //     ));
 // }
 
-fn wrapped_2d(mut query: Query<(&Wrapped2dComponent, &mut Transform)>) {
-    let (_, mut transform) = query.single_mut();
+fn wrapped_2d( mut query: Query<(&PlayerComponent,&Wrapped2dComponent, &mut Transform)>) {
+    let (_, _, mut transform) = query.single_mut(); // TODO: Won't work for bullets yet, because single_mut
 
     let cam_rect_right: f32 = WIDTH;
     let cam_rect_left: f32 = 0.0f32;
@@ -363,21 +413,26 @@ fn wrapped_2d(mut query: Query<(&Wrapped2dComponent, &mut Transform)>) {
 }
 
 fn player_system(
+    commands: Commands,
     keyboard_input: Res<Input<KeyCode>>,
+    textures: Res<TexturesResource>,
     time: Res<Time>,
     mut query: Query<(
         &mut PlayerComponent,
         &mut RotatorComponent,
         &mut Transform,
         &mut VelocityComponent,
+        &mut BulletContainer,
 //        &mut Rng,
     )>,
 ) {
     // println!("Player");
 
-    let (mut player, mut rotator, 
+    let (mut player, 
+        mut rotator, 
         mut transform, 
         mut velocity,
+        mut bulletContainer
     //    rng
     ) = query.single_mut();
 
@@ -432,11 +487,11 @@ fn player_system(
     //  Move forward in direction of velocity.
     transform.translation += velocity.v * time.delta_seconds();
 
-    if keyboard_input.pressed(KeyCode::Space)
-        || keyboard_input.pressed(KeyCode::LControl)
-        || keyboard_input.pressed(KeyCode::RControl)
+    if keyboard_input.just_pressed(KeyCode::Space)
+        || keyboard_input.just_pressed(KeyCode::LControl)
+        || keyboard_input.just_pressed(KeyCode::RControl)
     {
-        fire_bullet();
+        fire_bullet_from_player(textures, transform.as_ref(), &velocity.v, commands, bulletContainer.as_mut());
     }
 
     if time.seconds_since_startup() - player.last_hyperspace_time > 1.0f64 {
@@ -448,8 +503,44 @@ fn player_system(
     }
 }
 
-fn fire_bullet() {
-    println!("fire!")
+// TBD: If this were inside
+fn fire_bullet_from_player( textures: Res<TexturesResource>, playerTransform: &Transform, playerVelocity: &Vec3, mut commands: Commands, bc: & mut BulletContainer ) {
+    println!("fire!");
+    
+            if bc.bullet_entities.len() <= bc.max_bullets
+            {
+                let bullet_id = commands.spawn_bundle(SpriteSheetBundle {
+                    texture_atlas: textures.texture_atlas_handle.clone(), // TODO: is this really good?
+                    sprite: TextureAtlasSprite::new(textures.bullet_index),
+                    transform: Transform {
+                        scale: Vec3::splat(1.0),
+                        translation: playerTransform.translation.clone(), // TODO: This needs to be muzzle-child position.
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .insert(BulletComponent {
+                    source: BulletSource::Player
+                })
+                .insert(VelocityComponent {
+                    v: playerVelocity.mul( 1.4f32),
+                    max_speed: 5000.0f32
+                })
+                .insert(Wrapped2dComponent {
+                }).id();
+
+                bc.bullet_entities.push( bullet_id);
+
+                //TODO:
+
+                //newBullet.transform.position = MuzzleChild.transform.position;
+                //newBullet.transform.rotation = this.transform.rotation;
+                //newBullet.GetComponent<Rigidbody2D>().AddRelativeForce(Vector2.up*1.4f, ForceMode2D.Impulse);
+                //newBullet.gameObject.SetActive(true);
+    
+                // GameManager.Instance.PlayClip(ShootSound);
+                // Destroy(newBullet.gameObject, 1.4f);
+        }
 }
 
 fn make_random_pos() -> Vec3 {
