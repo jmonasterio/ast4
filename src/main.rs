@@ -629,3 +629,7 @@ fn frame_rate(
 //struct Scoreboard {
 //    score: usize,
 //}
+
+fn start_background_audio(asset_server: Res<AssetServer>, audio: Res<Audio>) {
+    audio.(asset_server.load("background_audio.ogg"));
+}
