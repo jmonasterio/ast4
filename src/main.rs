@@ -45,6 +45,9 @@ struct Wrapped2dComponent;
 #[derive(Component)]
 struct FrameRateComponent;
 
+#[derive(Component)]
+struct MuzzleComponent;
+
 #[derive(Component, Default)]
 struct PlayerComponent {
     pub thrust: f32,
@@ -300,9 +303,23 @@ fn setup<'a>(
     let ttad = texture_atlases.add(texture_atlas);
     textures_resource.texture_atlas_handle = ttad.clone();
 
-    commands
+    // This is where we shoot from on player.
+    let muzzle_id = commands.spawn()
+        .insert( Transform {
+            translation: Vec3::new(0f32, 12.5f32, 0f32),
+            ..Default::default()
+
+        })
+        .insert( GlobalTransform { 
+            ..Default::default()
+
+        })
+        .insert( MuzzleComponent {})
+        .id();
+
+    let player_id = commands
         .spawn_bundle(SpriteSheetBundle {
-            texture_atlas: textures_resource.texture_atlas_handle.clone(), // TODO: Do I really need this?
+            texture_atlas: textures_resource.texture_atlas_handle.clone(), // TODO: How to avoid clone 
             sprite: TextureAtlasSprite::new(textures_resource.player_index),
             transform: Transform {
                 scale: Vec3::splat(1.0),
@@ -329,7 +346,9 @@ fn setup<'a>(
         .insert(ShooterComponent {
             max_bullets: 4,
             bullet_speed: 400.0f32,
-        });
+        }).id();
+
+    commands.entity(player_id).push_children(&[muzzle_id]);
 
     commands
         .spawn_bundle(TextBundle {
@@ -454,6 +473,7 @@ fn player_system(
         //        &mut Rng,
     )>,
     bullet_query: Query<&BulletComponent>,
+    muzzle_query: Query<(&MuzzleComponent, &GlobalTransform)>
 ) {
     // println!("Player");
 
@@ -462,7 +482,7 @@ fn player_system(
         mut rotator,
         mut transform,
         mut velocity,
-        shooter, //    rng
+        shooter, 
     ) = query.single_mut();
 
     let mut dir = 0.0f32;
@@ -520,8 +540,11 @@ fn player_system(
         let mut count = 0;
         bullet_query.for_each(|_| count += 1);
         if count < shooter.max_bullets {
+
+            let (_, muzzle_transform) = muzzle_query.single();
+
             fire_bullet_from_player(textures, transform.as_ref(), 
-            &mut commands, &shooter, audio, audio_state);
+            &mut commands, &shooter, &muzzle_transform, audio, audio_state);
         }
     }
 
@@ -547,6 +570,7 @@ fn fire_bullet_from_player(
     player_transform: &Transform,
     commands: &mut Commands,
     shooter: &ShooterComponent,
+    muzzle_transform: &GlobalTransform,
     audio: Res<Audio>,
     audio_state: Res<audio_helper::AudioState>,
 ) {
@@ -558,7 +582,7 @@ fn fire_bullet_from_player(
             sprite: TextureAtlasSprite::new(textures.bullet_index),
             transform: Transform {
                 scale: Vec3::splat(1.0),
-                translation: player_transform.translation.clone(), // TODO: This needs to be muzzle-child position.
+                translation: muzzle_transform.translation.clone(), // TODO: This needs to be muzzle-child position.
                 ..Default::default()
             },
             ..Default::default()
