@@ -10,10 +10,12 @@ use bevy::{
 };
 use bevy_render::camera::{DepthCalculation, ScalingMode, WindowOrigin};
 //use bevy_rng::*;
+use bevy_kira_audio::{ Audio,AudioPlugin};
 
 //use bevy_window::*;
 //use bevy_winit::*;
 mod math;
+mod audio_helper;
 
 // TODO: Cooler asset loader: https://www.nikl.me/blog/2021/asset-handling-in-bevy-apps/#:~:text=Most%20games%20have%20some%20sort%20of%20loading%20screen,later%20states%20can%20use%20them%20through%20the%20ECS.
 // TODO: Inspector:  https://bevy-cheatbook.github.io/setup/bevy-tools.html
@@ -69,7 +71,7 @@ struct AutoDestroyComponent {
 
 impl AutoDestroyComponent {
     pub fn make_time(seconds: f32) -> std::time::Instant {
-       return std::time::Instant::now() + std::time::Duration::from_secs_f32(seconds);
+        return std::time::Instant::now() + std::time::Duration::from_secs_f32(seconds);
     }
 }
 
@@ -78,7 +80,7 @@ impl AutoDestroyComponent {
 #[derive(Component)]
 struct ShooterComponent {
     pub max_bullets: u8,
-    pub bullet_speed: f32
+    pub bullet_speed: f32,
 }
 
 #[derive(Component, Default)]
@@ -88,7 +90,6 @@ struct VelocityComponent {
 }
 
 impl VelocityComponent {
-
     // TODO: Should time be part of thrust?
     pub fn apply_thrust(&mut self, thrust: f32, direction: &Quat) {
         let (_, _, angle_radians) = direction.to_euler(EulerRot::XYZ);
@@ -202,6 +203,7 @@ fn main() {
         //.add_plugin( WindowPlugin { ..Default::default()})q
         .add_plugin(LogDiagnosticsPlugin::default())
         .add_plugin(FrameTimeDiagnosticsPlugin::default())
+        .add_plugin(AudioPlugin)
         //  .insert_resource(Scoreboard { score: 0 })
         //.insert_resource(GameEntities {
         //    game_over_entity: None,
@@ -220,6 +222,7 @@ fn main() {
             ..Default::default()
         })
         .add_startup_system(setup)
+        .add_system(audio_helper::check_audio_loading)
         .add_system_set(
             SystemSet::new()
                 .with_run_criteria(FixedTimestep::step(TIME_STEP as f64))
@@ -264,6 +267,8 @@ fn setup<'a>(
     mut texture_atlases: ResMut<Assets<TextureAtlas>>,
     mut textures_resource: ResMut<TexturesResource>,
 ) {
+    audio_helper::prepare_audio(&mut commands, asset_server.as_ref());
+
     // hot reloading of assets.
     asset_server.watch_for_changes().unwrap();
 
@@ -321,7 +326,10 @@ fn setup<'a>(
             v: Vec3::new(0f32, 0f32, 0f32),
             max_speed: 300.0f32,
         })
-        .insert(ShooterComponent { max_bullets: 4, bullet_speed: 400.0f32 });
+        .insert(ShooterComponent {
+            max_bullets: 4,
+            bullet_speed: 400.0f32,
+        });
 
     commands
         .spawn_bundle(TextBundle {
@@ -396,15 +404,13 @@ fn setup<'a>(
 //     ));
 // }
 
-fn wrapped_2d(mut query: Query<( &Wrapped2dComponent, &mut Transform)>) {
-
+fn wrapped_2d(mut query: Query<(&Wrapped2dComponent, &mut Transform)>) {
     let cam_rect_right: f32 = WIDTH;
     let cam_rect_left: f32 = 0.0f32;
     let cam_rect_top = HEIGHT;
     let cam_rect_bottom = 0.0f32;
 
-    for ( _, mut transform) in query.iter_mut() {
-
+    for (_, mut transform) in query.iter_mut() {
         if transform.translation.x > cam_rect_right {
             transform.translation.x = cam_rect_left;
         } else if transform.translation.x < cam_rect_left {
@@ -437,6 +443,8 @@ fn player_system(
     keyboard_input: Res<Input<KeyCode>>,
     textures: Res<TexturesResource>,
     time: Res<Time>,
+    audio: Res<Audio>,
+    audio_state: Res<audio_helper::AudioState>,
     mut query: Query<(
         &mut PlayerComponent,
         &mut RotatorComponent,
@@ -445,7 +453,7 @@ fn player_system(
         &mut ShooterComponent,
         //        &mut Rng,
     )>,
-    bullet_query: Query<&BulletComponent>
+    bullet_query: Query<&BulletComponent>,
 ) {
     // println!("Player");
 
@@ -505,25 +513,16 @@ fn player_system(
         */
     }
 
-
     if keyboard_input.just_pressed(KeyCode::Space)
         || keyboard_input.just_pressed(KeyCode::LControl)
         || keyboard_input.just_pressed(KeyCode::RControl)
     {
-
         let mut count = 0;
-        bullet_query.for_each( |_| { count+=1} );
+        bullet_query.for_each(|_| count += 1);
         if count < shooter.max_bullets {
-    
-
-            fire_bullet_from_player(
-            textures,
-            transform.as_ref(),
-            &mut commands,
-            &shooter
-            );
+            fire_bullet_from_player(textures, transform.as_ref(), 
+            &mut commands, &shooter, audio, audio_state);
         }
-    
     }
 
     if time.seconds_since_startup() - player.last_hyperspace_time > 1.0f64 {
@@ -535,15 +534,11 @@ fn player_system(
     }
 }
 
-
-fn velocity_system(     time: Res<Time>,
-    mut query: Query<( &mut Transform, &VelocityComponent)>) {
-
-    for ( mut transform, velocity) in query.iter_mut() {
+fn velocity_system(time: Res<Time>, mut query: Query<(&mut Transform, &VelocityComponent)>) {
+    for (mut transform, velocity) in query.iter_mut() {
         //  Move forward in direction of velocity.
         transform.as_mut().translation += velocity.v * time.delta_seconds();
     }
-
 }
 
 // TBD: If this were inside
@@ -551,8 +546,11 @@ fn fire_bullet_from_player(
     textures: Res<TexturesResource>,
     player_transform: &Transform,
     commands: &mut Commands,
-    shooter: &ShooterComponent
+    shooter: &ShooterComponent,
+    audio: Res<Audio>,
+    audio_state: Res<audio_helper::AudioState>,
 ) {
+    audio_helper::play_single_sound(audio, audio_state);
 
     commands
         .spawn_bundle(SpriteSheetBundle {
@@ -575,7 +573,7 @@ fn fire_bullet_from_player(
         .insert(Wrapped2dComponent {})
         .insert(AutoDestroyComponent {
             enabled: true,
-            when: AutoDestroyComponent::make_time( 1.0f32),
+            when: AutoDestroyComponent::make_time(1.0f32),
         });
 
     //TODO:
@@ -589,11 +587,9 @@ fn fire_bullet_from_player(
     // Destroy(newBullet.gameObject, 1.4f);
 }
 
-fn calc_player_normalized_pointing_dir( p: &Transform ) -> Vec3 {
-
+fn calc_player_normalized_pointing_dir(p: &Transform) -> Vec3 {
     let (_, _, angle_radians) = p.rotation.to_euler(EulerRot::XYZ);
     let dir_vector = Vec3::new(-f32::sin(angle_radians), f32::cos(angle_radians), 0f32);
-
 
     return dir_vector;
 }
@@ -630,6 +626,3 @@ fn frame_rate(
 //    score: usize,
 //}
 
-fn start_background_audio(asset_server: Res<AssetServer>, audio: Res<Audio>) {
-    audio.(asset_server.load("background_audio.ogg"));
-}
