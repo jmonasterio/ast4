@@ -46,14 +46,14 @@ struct FrameRateComponent;
 #[derive(Component, Default)]
 struct PlayerComponent {
     pub thrust: f32,
-    pub player_index: u8, // Or 1, for 2 players
+    // TODO: pub player_index: u8, // Or 1, for 2 players
     pub friction: f32,
     pub last_hyperspace_time: f64,
 }
 
 enum BulletSource {
     Player,
-    Alient,
+    Alien,
 }
 
 #[derive(Component)]
@@ -68,8 +68,8 @@ struct AutoDestroyComponent {
 }
 
 impl AutoDestroyComponent {
-    pub fn destroy_in(&mut self, d: std::time::Duration) {
-        self.when = std::time::Instant::now() + d;
+    pub fn make_time(seconds: f32) -> std::time::Instant {
+       return std::time::Instant::now() + std::time::Duration::from_secs_f32(seconds);
     }
 }
 
@@ -88,7 +88,9 @@ struct VelocityComponent {
 }
 
 impl VelocityComponent {
-    pub fn apply_thrust(&mut self, thrust: f32, direction: &Quat, time: &Res<Time>) {
+
+    // TODO: Should time be part of thrust?
+    pub fn apply_thrust(&mut self, thrust: f32, direction: &Quat) {
         let (_, _, angle_radians) = direction.to_euler(EulerRot::XYZ);
         let thrust_vector =
             thrust * Vec3::new(-f32::sin(angle_radians), f32::cos(angle_radians), 0f32);
@@ -96,7 +98,7 @@ impl VelocityComponent {
         self.v = self.v.clamp_length_max(self.max_speed);
     }
 
-    pub fn apply_friction(&mut self, friction: f32, time: &Time) {
+    pub fn apply_friction(&mut self, friction: f32) {
         self.v *= friction;
         if self.v.length() < 1f32 {
             self.v = Vec3::new(0f32, 0f32, 0f32);
@@ -198,8 +200,8 @@ fn main() {
         //.add_plugin( RngPlugin)
 
         //.add_plugin( WindowPlugin { ..Default::default()})q
-        //.add_plugin(LogDiagnosticsPlugin::default())
-        //.add_plugin(FrameTimeDiagnosticsPlugin::default())
+        .add_plugin(LogDiagnosticsPlugin::default())
+        .add_plugin(FrameTimeDiagnosticsPlugin::default())
         //  .insert_resource(Scoreboard { score: 0 })
         //.insert_resource(GameEntities {
         //    game_over_entity: None,
@@ -260,17 +262,10 @@ fn setup<'a>(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut texture_atlases: ResMut<Assets<TextureAtlas>>,
-    mut windows: ResMut<Windows>, //,   mut game_entities: ResMut<GameEntities>,
     mut textures_resource: ResMut<TexturesResource>,
 ) {
     // hot reloading of assets.
     asset_server.watch_for_changes().unwrap();
-
-    //let window = windows.get_primary_mut().unwrap();
-    //window.set_resolution(WIDTH, HEIGHT);
-    //window.height(300.f32);
-
-    //window.set_cursor_visibility(false);
 
     // Add the game's entities to our world
 
@@ -314,7 +309,6 @@ fn setup<'a>(
         .insert(PlayerComponent {
             thrust: 2.0f32,
             friction: 0.98f32,
-            player_index: 0,
             last_hyperspace_time: 0f64,
         })
         .insert(Wrapped2dComponent)
@@ -409,7 +403,7 @@ fn wrapped_2d(mut query: Query<( &Wrapped2dComponent, &mut Transform)>) {
     let cam_rect_top = HEIGHT;
     let cam_rect_bottom = 0.0f32;
 
-    for ( ( _, mut transform)) in query.iter_mut() {
+    for ( _, mut transform) in query.iter_mut() {
 
         if transform.translation.x > cam_rect_right {
             transform.translation.x = cam_rect_left;
@@ -451,7 +445,7 @@ fn player_system(
         &mut ShooterComponent,
         //        &mut Rng,
     )>,
-    bulletQuery: Query<(&BulletComponent)>
+    bullet_query: Query<&BulletComponent>
 ) {
     // println!("Player");
 
@@ -460,7 +454,7 @@ fn player_system(
         mut rotator,
         mut transform,
         mut velocity,
-        mut shooter, //    rng
+        shooter, //    rng
     ) = query.single_mut();
 
     let mut dir = 0.0f32;
@@ -481,7 +475,7 @@ fn player_system(
     if vert > 0.0f32 {
         // TOo much trouble to implement rigid body like in Unity, so wrote my own.
         // Assume no friction while accelerating.
-        velocity.apply_thrust(player.thrust, &transform.rotation, &time);
+        velocity.apply_thrust(player.thrust, &transform.rotation);
 
         /*
         if (_exhaustParticleSystem.isStopped)
@@ -497,7 +491,7 @@ fn player_system(
         }
         */
     } else {
-        velocity.apply_friction(player.friction, &time);
+        velocity.apply_friction(player.friction);
         /* TODO
         if (_exhaustParticleSystem.isPlaying)
         {
@@ -518,14 +512,13 @@ fn player_system(
     {
 
         let mut count = 0;
-        bulletQuery.for_each( |_| { count+=1} );
+        bullet_query.for_each( |_| { count+=1} );
         if count < shooter.max_bullets {
     
 
             fire_bullet_from_player(
             textures,
             transform.as_ref(),
-            &velocity.v,
             &mut commands,
             &shooter
             );
@@ -556,8 +549,7 @@ fn velocity_system(     time: Res<Time>,
 // TBD: If this were inside
 fn fire_bullet_from_player(
     textures: Res<TexturesResource>,
-    playerTransform: &Transform,
-    playerVelocity: &Vec3,
+    player_transform: &Transform,
     commands: &mut Commands,
     shooter: &ShooterComponent
 ) {
@@ -568,7 +560,7 @@ fn fire_bullet_from_player(
             sprite: TextureAtlasSprite::new(textures.bullet_index),
             transform: Transform {
                 scale: Vec3::splat(1.0),
-                translation: playerTransform.translation.clone(), // TODO: This needs to be muzzle-child position.
+                translation: player_transform.translation.clone(), // TODO: This needs to be muzzle-child position.
                 ..Default::default()
             },
             ..Default::default()
@@ -577,13 +569,13 @@ fn fire_bullet_from_player(
             source: BulletSource::Player,
         })
         .insert(VelocityComponent {
-            v: calc_player_normalized_pointing_dir(playerTransform).mul(shooter.bullet_speed),
+            v: calc_player_normalized_pointing_dir(player_transform).mul(shooter.bullet_speed),
             max_speed: 5000.0f32,
         })
         .insert(Wrapped2dComponent {})
         .insert(AutoDestroyComponent {
             enabled: true,
-            when: std::time::Instant::now() + std::time::Duration::new(1u64, 0),
+            when: AutoDestroyComponent::make_time( 1.0f32),
         });
 
     //TODO:
