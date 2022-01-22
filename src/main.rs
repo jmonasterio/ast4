@@ -11,12 +11,12 @@ use bevy::{
 };
 use bevy_render::camera::{DepthCalculation, ScalingMode, WindowOrigin};
 //use bevy_rng::*;
-use bevy_kira_audio::{ Audio,AudioPlugin};
+use bevy_kira_audio::{Audio, AudioPlugin};
 
 //use bevy_window::*;
 //use bevy_winit::*;
-mod math;
 mod audio_helper;
+mod math;
 
 // TODO: Shooter not shooting straight.
 // TODO: Cooler asset loader: https://www.nikl.me/blog/2021/asset-handling-in-bevy-apps/#:~:text=Most%20games%20have%20some%20sort%20of%20loading%20screen,later%20states%20can%20use%20them%20through%20the%20ECS.
@@ -306,22 +306,21 @@ fn setup<'a>(
     textures_resource.texture_atlas_handle = ttad.clone();
 
     // This is where we shoot from on player.
-    let muzzle_id = commands.spawn()
-        .insert( Transform {
+    let muzzle_id = commands
+        .spawn()
+        .insert(Transform {
             translation: Vec3::new(0f32, 12.5f32, 0f32),
             ..Default::default()
-
         })
-        .insert( GlobalTransform { 
+        .insert(GlobalTransform {
             ..Default::default()
-
         })
-        .insert( MuzzleComponent {})
+        .insert(MuzzleComponent {})
         .id();
 
     let player_id = commands
         .spawn_bundle(SpriteSheetBundle {
-            texture_atlas: textures_resource.texture_atlas_handle.clone(), // TODO: How to avoid clone 
+            texture_atlas: textures_resource.texture_atlas_handle.clone(), // TODO: How to avoid clone
             sprite: TextureAtlasSprite::new(textures_resource.player_index),
             transform: Transform {
                 scale: Vec3::splat(1.0),
@@ -348,7 +347,8 @@ fn setup<'a>(
         .insert(ShooterComponent {
             max_bullets: 4,
             bullet_speed: 400.0f32,
-        }).id();
+        })
+        .id();
 
     commands.entity(player_id).push_children(&[muzzle_id]);
 
@@ -475,17 +475,11 @@ fn player_system(
         //        &mut Rng,
     )>,
     bullet_query: Query<&BulletComponent>,
-    muzzle_query: Query<(&MuzzleComponent, &GlobalTransform)>
+    muzzle_query: Query<(&MuzzleComponent, &GlobalTransform)>,
 ) {
     // println!("Player");
 
-    let (
-        mut player,
-        mut rotator,
-        mut transform,
-        mut velocity,
-        shooter, 
-    ) = query.single_mut();
+    let (mut player, mut rotator, mut transform, mut velocity, shooter) = query.single_mut();
 
     let mut dir = 0.0f32;
     if keyboard_input.pressed(KeyCode::Left) {
@@ -503,7 +497,15 @@ fn player_system(
     }
     // Maybe a thruster component? Or maybe Rotator+Thruster=PlayerMover component.
     if vert > 0.0f32 {
-        // TOo much trouble to implement rigid body like in Unity, so wrote my own.
+        // Can't stop looped sounds individually, so one per track.
+        audio_helper::start_looped_sound(
+            &audio_helper::Tracks::Thrust,
+            &audio_helper::Sounds::Thrust,
+            &audio,
+            &audio_state,
+        );
+
+        // Too much trouble to implement rigid body like in Unity, so wrote my own.
         // Assume no friction while accelerating.
         velocity.apply_thrust(player.thrust, &transform.rotation);
 
@@ -522,11 +524,16 @@ fn player_system(
         */
     } else {
         velocity.apply_friction(player.friction);
+
+        audio_helper::stop_looped_sound(&audio_helper::Tracks::Thrust, &audio, &audio_state);
+
         /* TODO
         if (_exhaustParticleSystem.isPlaying)
         {
             _exhaustParticleSystem.Stop();
         }
+
+
         if (_thrustAudioSource.isPlaying)
         {
             _thrustAudioSource.Stop();
@@ -540,11 +547,17 @@ fn player_system(
         || keyboard_input.just_pressed(KeyCode::RControl)
     {
         if bullet_query.iter().count() < shooter.max_bullets {
-
             let (_, muzzle_transform) = muzzle_query.single();
 
-            fire_bullet_from_player(textures, transform.as_ref(), 
-            &mut commands, &shooter, &muzzle_transform, audio, audio_state);
+            fire_bullet_from_player(
+                textures,
+                transform.as_ref(),
+                &mut commands,
+                &shooter,
+                &muzzle_transform,
+                audio,
+                audio_state,
+            );
         }
     }
 
@@ -574,7 +587,12 @@ fn fire_bullet_from_player(
     audio: Res<Audio>,
     audio_state: Res<audio_helper::AudioState>,
 ) {
-    audio_helper::play_single_sound(Sounds::Fire, audio, audio_state);
+    audio_helper::play_single_sound(
+        &audio_helper::Tracks::Game,
+        &audio_helper::Sounds::Fire,
+        audio,
+        audio_state,
+    );
 
     commands
         .spawn_bundle(SpriteSheetBundle {
@@ -649,4 +667,3 @@ fn frame_rate(
 //struct Scoreboard {
 //    score: usize,
 //}
-
