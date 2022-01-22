@@ -1,5 +1,7 @@
 Port of my AST3 asteroids clone Bevy/rust from Unity/C#.
 
+This is my first rust program. Be gentle.
+
 NOTES to SELF:
 
 
