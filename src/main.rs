@@ -2,6 +2,7 @@
 
 use std::ops::Mul;
 
+use audio_helper::Sounds;
 use bevy::{
     core::FixedTimestep,
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin}, //sprite::collide_aabb::{collide, Collision},
@@ -17,6 +18,7 @@ use bevy_kira_audio::{ Audio,AudioPlugin};
 mod math;
 mod audio_helper;
 
+// TODO: Shooter not shooting straight.
 // TODO: Cooler asset loader: https://www.nikl.me/blog/2021/asset-handling-in-bevy-apps/#:~:text=Most%20games%20have%20some%20sort%20of%20loading%20screen,later%20states%20can%20use%20them%20through%20the%20ECS.
 // TODO: Inspector:  https://bevy-cheatbook.github.io/setup/bevy-tools.html
 
@@ -82,7 +84,7 @@ impl AutoDestroyComponent {
 // Any entity that can shoot a bullet should have one of these to manage their bullets.
 #[derive(Component)]
 struct ShooterComponent {
-    pub max_bullets: u8,
+    pub max_bullets: usize,
     pub bullet_speed: f32,
 }
 
@@ -537,9 +539,7 @@ fn player_system(
         || keyboard_input.just_pressed(KeyCode::LControl)
         || keyboard_input.just_pressed(KeyCode::RControl)
     {
-        let mut count = 0;
-        bullet_query.for_each(|_| count += 1);
-        if count < shooter.max_bullets {
+        if bullet_query.iter().count() < shooter.max_bullets {
 
             let (_, muzzle_transform) = muzzle_query.single();
 
@@ -574,7 +574,7 @@ fn fire_bullet_from_player(
     audio: Res<Audio>,
     audio_state: Res<audio_helper::AudioState>,
 ) {
-    audio_helper::play_single_sound(audio, audio_state);
+    audio_helper::play_single_sound(Sounds::Fire, audio, audio_state);
 
     commands
         .spawn_bundle(SpriteSheetBundle {
