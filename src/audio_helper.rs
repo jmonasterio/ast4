@@ -85,8 +85,8 @@ pub fn stop_looped_sound(track: &Tracks, audio: &Res<Audio>, audio_state: &Res<A
 pub fn play_single_sound(
     track: &Tracks,
     sound: &Sounds,
-    audio: Res<Audio>,
-    audio_state: Res<AudioState>,
+    audio: &Res<Audio>,
+    audio_state: &Res<AudioState>,
 ) {
     if !audio_state.audio_loaded {
         return;

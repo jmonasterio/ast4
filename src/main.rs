@@ -1,6 +1,6 @@
 //#![windows_subsystem = "windows"] // Remove comment to turn off console log output
 
-use std::ops::Mul;
+use std::{ops::Mul, time::Duration};
 
 use audio_helper::Sounds;
 use bevy::{
@@ -170,6 +170,12 @@ struct GameStateResource {
     next_free_life_score: u64,
 }
 
+struct SceneControllerResource {
+    next_jaws_sound_time: std::time::Instant,
+    jaw_interval_seconds: Duration,
+    jaws_alternate: bool,
+}
+
 #[derive(Default, Clone)]
 struct TexturesResource {
     texture_atlas_handle: Handle<TextureAtlas>,
@@ -213,6 +219,11 @@ fn main() {
         //.insert_resource(GameEntities {
         //    game_over_entity: None,
         //})
+        .insert_resource(SceneControllerResource {
+            jaw_interval_seconds: Duration::from_secs_f32(0.9f32),
+            jaws_alternate: false,
+            next_jaws_sound_time: std::time::Instant::now(),
+        })
         .insert_resource(FrameRateResource {
             delta_time: 0f64,
             display_frame_rate: true,
@@ -236,6 +247,7 @@ fn main() {
                 .with_system(wrapped_2d)
                 .with_system(auto_destroy_system)
                 .with_system(velocity_system) 
+                .with_system(scene_system)
                 //.with_system(paddle_movement_system)
                 //.with_system(ball_collision_system)
                 //.with_system(ball_movement_system),
@@ -590,8 +602,8 @@ fn fire_bullet_from_player(
     audio_helper::play_single_sound(
         &audio_helper::Tracks::Game,
         &audio_helper::Sounds::Fire,
-        audio,
-        audio_state,
+        &audio,
+        &audio_state,
     );
 
     commands
@@ -661,6 +673,53 @@ fn frame_rate(
     if fr.display_frame_rate || true {
         let (mut text, _) = query.single_mut();
         text.sections[1].value = format!("{:.1}", fr.fps_last);
+    }
+}
+
+fn scene_system(
+    time: Res<Time>,
+    mut scene_controller: ResMut<SceneControllerResource>,
+    audio: Res<Audio>,
+    audio_state: Res<audio_helper::AudioState>,
+) {
+    update_jaws_sound(&time, &mut scene_controller, &audio, &audio_state);
+}
+
+// TODO: Make impl method on the scene controller.
+fn update_jaws_sound(
+    time: &Res<Time>,
+    scene_controller: &mut ResMut<SceneControllerResource>,
+    audio: &Res<Audio>,
+    audio_state: &Res<audio_helper::AudioState>,
+) {
+    // TODO: Lame that Time doesn't have a mehthod for this.
+    let now = time.startup() + time.time_since_startup();
+
+    if now > scene_controller.next_jaws_sound_time
+    // if in level
+    {
+        if scene_controller.jaw_interval_seconds.as_secs_f32() > 0.1800f32 {
+            scene_controller.jaw_interval_seconds = Duration::from_secs_f32(
+                scene_controller.jaw_interval_seconds.as_secs_f32() - 0.005f32,
+            );
+        }
+        scene_controller.next_jaws_sound_time = now + scene_controller.jaw_interval_seconds;
+        if scene_controller.jaws_alternate {
+            audio_helper::play_single_sound(
+                &audio_helper::Tracks::Ambience,
+                &audio_helper::Sounds::Beat1,
+                audio,
+                audio_state,
+            );
+        } else {
+            audio_helper::play_single_sound(
+                &audio_helper::Tracks::Ambience,
+                &audio_helper::Sounds::Beat2,
+                audio,
+                audio_state,
+            );
+        }
+        scene_controller.jaws_alternate = !scene_controller.jaws_alternate;
     }
 }
 
