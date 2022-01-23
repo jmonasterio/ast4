@@ -110,15 +110,21 @@ struct GameManagerResource {
 impl GameManagerResource {
     fn player_killed(
         &mut self,
+        mut commands: Commands,
         player: &PlayerComponent,
         sceneController: &mut ResMut<SceneControllerResource>,
+        textures_resource: Res<TexturesResource>,
         time: &Res<Time>,
     ) {
         if self.lives < 1 {
             self.state = State::Over;
             sceneController.game_over(time, player);
         } else {
-            sceneController.respawn_player(FutureTime::from_now(time, 0.5f64));
+            sceneController.respawn_player(
+                commands,
+                textures_resource,
+                FutureTime::from_now(time, 0.5f64),
+            );
         }
     }
 }
@@ -135,11 +141,67 @@ impl SceneControllerResource {
         self.disable_start_button_until_time = Some(from_now(time, 1.5f64));
     }
 
-    fn respawn_player(&mut self, ft: FutureTime) {
-        //todo
+    fn respawn_player(
+        &mut self,
+        mut commands: Commands,
+        textures_resource: Res<TexturesResource>,
+        ft: FutureTime,
+    ) {
+        // This is where we shoot from on player.
+        let muzzle_id = commands
+            .spawn()
+            .insert(Transform {
+                translation: Vec3::new(0f32, 12.5f32, 0f32),
+                ..Default::default()
+            })
+            .insert(GlobalTransform {
+                ..Default::default()
+            })
+            .insert(MuzzleComponent {})
+            .id();
+
+        let player_id = commands
+            .spawn_bundle(SpriteSheetBundle {
+                texture_atlas: textures_resource.texture_atlas_handle.clone(), // TODO: How to avoid clone
+                sprite: TextureAtlasSprite::new(textures_resource.player_index),
+                transform: Transform {
+                    scale: Vec3::splat(1.0),
+                    translation: Vec3::new(50.0, 50.0, 0.0),
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .insert(PlayerComponent {
+                thrust: 2.0f32,
+                friction: 0.98f32,
+                last_hyperspace_time: 0f64,
+            })
+            .insert(Wrapped2dComponent)
+            .insert(RotatorComponent {
+                snap_angle: None,
+                angle_increment: (std::f32::consts::PI / 16.0f32),
+                rotate_speed: 4.0f32,
+            })
+            .insert(VelocityComponent {
+                v: Vec3::new(0f32, 0f32, 0f32),
+                max_speed: 300.0f32,
+            })
+            .insert(ShooterComponent {
+                max_bullets: 4,
+                bullet_speed: 400.0f32,
+            })
+            .id();
+
+        commands.entity(player_id).push_children(&[muzzle_id]);
     }
 
-    fn start_game(&mut self, mut game_manager: ResMut<GameManagerResource>, time: &Res<Time>) {
+    fn start_game(
+        &mut self,
+        mut commands: Commands,
+        textures_resource: Res<TexturesResource>,
+        mut game_manager: ResMut<GameManagerResource>,
+        time: &Res<Time>,
+    ) {
         self.level = 0;
         game_manager.next_free_life_score = FREE_USER_AT;
 
@@ -150,7 +212,11 @@ impl SceneControllerResource {
         self.clear_asteroids();
         self.clear_aliens();
         self.start_level(time);
-        self.respawn_player(FutureTime::from_now(time, 0.5f64));
+        self.respawn_player(
+            commands,
+            textures_resource,
+            FutureTime::from_now(time, 0.5f64),
+        );
     }
 
     fn start_level(&mut self, time: &Res<Time>) {
@@ -164,12 +230,8 @@ impl SceneControllerResource {
 
     fn can_start_game(&mut self, time: &Res<Time>) -> bool {
         match self.disable_start_button_until_time {
-            Some(dsbut) => {
-                dsbut.is_after(time)
-            }
-            None => {
-                true
-            }
+            Some(dsbut) => dsbut.is_after(time),
+            None => true,
         }
     }
 
@@ -262,9 +324,9 @@ impl RotatorComponent {
         } else {
             // When button released, snap to next angle.
             if let Some(snap_angle) = self.snap_angle {
-                            transform.rotation = Quat::from_rotation_z(snap_angle);
-                               self.snap_angle = None;
-                           }
+                transform.rotation = Quat::from_rotation_z(snap_angle);
+                self.snap_angle = None;
+            }
         }
     }
 }
@@ -372,7 +434,7 @@ fn main() {
                 .with_system(player_system)
                 .with_system(wrapped_2d)
                 .with_system(auto_destroy_system)
-                .with_system(velocity_system) 
+                .with_system(velocity_system)
                 .with_system(scene_system)
                 //.with_system(paddle_movement_system)
                 //.with_system(ball_collision_system)
@@ -445,53 +507,6 @@ fn setup<'a>(
     let ttad = texture_atlases.add(texture_atlas);
     textures_resource.texture_atlas_handle = ttad.clone();
 
-    // This is where we shoot from on player.
-    let muzzle_id = commands
-        .spawn()
-        .insert(Transform {
-            translation: Vec3::new(0f32, 12.5f32, 0f32),
-            ..Default::default()
-        })
-        .insert(GlobalTransform {
-            ..Default::default()
-        })
-        .insert(MuzzleComponent {})
-        .id();
-
-    let player_id = commands
-        .spawn_bundle(SpriteSheetBundle {
-            texture_atlas: textures_resource.texture_atlas_handle.clone(), // TODO: How to avoid clone
-            sprite: TextureAtlasSprite::new(textures_resource.player_index),
-            transform: Transform {
-                scale: Vec3::splat(1.0),
-                translation: Vec3::new(50.0, 50.0, 0.0),
-                ..Default::default()
-            },
-            ..Default::default()
-        })
-        .insert(PlayerComponent {
-            thrust: 2.0f32,
-            friction: 0.98f32,
-            last_hyperspace_time: 0f64,
-        })
-        .insert(Wrapped2dComponent)
-        .insert(RotatorComponent {
-            snap_angle: None,
-            angle_increment: (std::f32::consts::PI / 16.0f32),
-            rotate_speed: 4.0f32,
-        })
-        .insert(VelocityComponent {
-            v: Vec3::new(0f32, 0f32, 0f32),
-            max_speed: 300.0f32,
-        })
-        .insert(ShooterComponent {
-            max_bullets: 4,
-            bullet_speed: 400.0f32,
-        })
-        .id();
-
-    commands.entity(player_id).push_children(&[muzzle_id]);
-
     commands
         .spawn_bundle(TextBundle {
             text: Text {
@@ -528,34 +543,35 @@ fn setup<'a>(
         })
         .insert(FrameRateComponent);
 
-    commands
-        .spawn_bundle(TextBundle {
-            text: Text {
-                sections: vec![TextSection {
-                    value: "GAME OVER".to_string(),
-                    style: TextStyle {
-                        font: asset_server.load("fonts/Hyperspace.otf"),
-                        font_size: 30.0,
-                        color: Color::rgb(1.0, 1.0, 1.0),
-                    },
-                }],
-                ..Default::default()
-            },
-            style: Style {
-                position_type: PositionType::Absolute,
-                position: Rect {
-                    top: Val::Percent(40.0f32),
-                    left: Val::Px(200.0),
-                    ..Default::default()
+    commands.spawn_bundle(TextBundle {
+        text: Text {
+            sections: vec![TextSection {
+                value: "Game Over\n\n\nPress space to start\nCTRL to shoot\nL/R arrow keys to rotate\nup arrow for thrust\nenter for hyperspace".to_string(),
+                style: TextStyle {
+                    font: asset_server.load("fonts/Hyperspace.otf"),
+                    font_size: 30.0,
+                    color: Color::rgb(1.0, 1.0, 1.0),
                 },
+            }],
+            alignment: TextAlignment {
+                vertical: VerticalAlign::Center,
+                horizontal: HorizontalAlign::Center,
+            },
+        },
+        style: Style {
+            align_self: AlignSelf::Center,
+            position_type: PositionType::Absolute,
+            position: Rect {
+                top: Val::Percent(30.0f32),
+                left: Val::Percent(30.0f32),
                 ..Default::default()
             },
             ..Default::default()
-        })
-        .insert(GameOverComponent)
-        .insert(Visibility { is_visible: false })
-        ;
-
+        },
+        ..Default::default()
+    })
+    .insert(GameOverComponent)
+    .insert(Visibility { is_visible: false });
 }
 
 /// This system will then change the title during execution
@@ -608,6 +624,7 @@ fn auto_destroy_system(
 
 fn player_system(
     mut commands: Commands,
+    game_manager: Res<GameManagerResource>,
     keyboard_input: Res<Input<KeyCode>>,
     textures: Res<TexturesResource>,
     time: Res<Time>,
@@ -625,7 +642,9 @@ fn player_system(
     muzzle_query: Query<(&MuzzleComponent, &GlobalTransform)>,
 ) {
     // println!("Player");
-
+    if query.is_empty() || game_manager.state == State::Over {
+        return; // No player.
+    }
     let (mut player, mut rotator, mut transform, mut velocity, shooter) = query.single_mut();
 
     let mut dir = 0.0f32;
@@ -689,8 +708,7 @@ fn player_system(
         */
     }
 
-    if keyboard_input.just_pressed(KeyCode::Space)
-        || keyboard_input.just_pressed(KeyCode::LControl)
+    if keyboard_input.just_pressed(KeyCode::LControl)
         || keyboard_input.just_pressed(KeyCode::RControl)
     {
         if bullet_query.iter().count() < shooter.max_bullets {
@@ -788,16 +806,17 @@ fn calc_player_normalized_pointing_dir(p: &Transform) -> Vec3 {
 fn make_random_pos() -> Vec3 {
     let x = fastrand::f32();
     let y = fastrand::f32();
-    return Vec3::new(x * WIDTH, y * HEIGHT, 0f32);
+    Vec3::new(x * WIDTH, y * HEIGHT, 0f32)
 }
 
+// Show or hide instructions based on game state.
 fn game_over_system(
-    gameManager: Res<GameManagerResource>,
+    game_manager: Res<GameManagerResource>,
     mut query: Query<(&mut Visibility, &GameOverComponent)>,
 ) {
-    let (mut vis, _) = query.single_mut();
-
-    vis.is_visible = gameManager.state == State::Over;
+    for (mut vis, _) in query.iter_mut() {
+        vis.is_visible = game_manager.state == State::Over;
+    }
 }
 
 fn frame_rate(
@@ -812,19 +831,21 @@ fn frame_rate(
         // TODO
     }
 
-    if fr.display_frame_rate  {
+    if fr.display_frame_rate {
         let (mut text, _) = query.single_mut();
         text.sections[1].value = format!("{:.1}", fr.fps_last);
     }
 }
 
 fn scene_system(
+    mut commands: Commands,
     mut scene_controller: ResMut<SceneControllerResource>,
     mut game_manager: ResMut<GameManagerResource>,
     keyboard_input: Res<Input<KeyCode>>,
     time: Res<Time>,
     audio: Res<Audio>,
     audio_state: Res<audio_helper::AudioState>,
+    textures_resource: Res<TexturesResource>,
 ) {
     match game_manager.state {
         State::Playing => {
@@ -840,7 +861,7 @@ fn scene_system(
                     game_manager.lives = 4;
                     game_manager.score = 0;
                     game_manager.state = State::Playing;
-                    scene_controller.start_game(game_manager, &time);
+                    scene_controller.start_game(commands, textures_resource, game_manager, &time);
                 }
             }
         }
