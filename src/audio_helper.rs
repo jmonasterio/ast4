@@ -151,7 +151,7 @@ use bevy::asset::LoadState;
 
 // TODO: Seems stupid to check this every frame.
 pub fn check_audio_loading(mut audio_state: ResMut<AudioState>, asset_server: ResMut<AssetServer>) {
-    if audio_state.audio_loaded == false {
+    if !audio_state.audio_loaded {
         //|| LoadState::Loaded != asset_server.get_load_state(&audio_state.loop_handle)
         if audio_state
             .sound_handles

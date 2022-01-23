@@ -33,32 +33,32 @@ mod math;
 // Resource = Singleton
 
 const TIME_STEP: f32 = 1.0 / 60.0;
-const PROJECT: &'static str = "AST4!";
+const PROJECT: &str = "AST4!";
 const WIDTH: f32 = 800.0f32;
 const HEIGHT: f32 = 600.0f32;
 const FREE_USER_AT: u32 = 10000;
 
-fn from_now(t: &Time, delta_sec: f64) -> FutureTime {
-    return FutureTime::from_now(t, delta_sec);
-}
-
 #[derive(Clone, Copy)]
 struct FutureTime {
-    seconds_since_startup: f64,
+    seconds_since_startup_to_auto_destroy: f64,
 }
 
 impl FutureTime {
     fn from_now(t: &Time, sec: f64) -> FutureTime {
+        assert!( sec >= 0f64);
         let now = t.seconds_since_startup();
+        let future = now + sec;
 
-        let ft = FutureTime {
-            seconds_since_startup: now + sec,
-        };
-        return ft;
+        FutureTime {
+            seconds_since_startup_to_auto_destroy: future,
+        }
     }
 
-    fn is_after(&self, t: &Time) -> bool {
-        self.seconds_since_startup < t.seconds_since_startup()
+    fn is_expired(&self, t: &Time) -> bool {
+        let now = t.seconds_since_startup();
+        let future = self.seconds_since_startup_to_auto_destroy;
+        let is_expired = now > future;
+        is_expired
     }
 }
 
@@ -70,6 +70,11 @@ struct Wrapped2dComponent;
 
 #[derive(Component)]
 struct FrameRateComponent;
+
+#[derive(Component)]
+struct AsteroidComponent {
+    size: AsteroidSize,
+}
 
 #[derive(Component)]
 struct MuzzleComponent;
@@ -87,6 +92,13 @@ struct ScoreComponent;
 enum BulletSource {
     Player,
     Alien,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum AsteroidSize {
+    Large,
+    Medium,
+    Small,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -112,19 +124,19 @@ struct GameManagerResource {
 impl GameManagerResource {
     fn player_killed(
         &mut self,
-        mut commands: Commands,
+        commands: &mut Commands,
         player: &PlayerComponent,
-        sceneController: &mut ResMut<SceneControllerResource>,
+        scene_controller: &mut ResMut<SceneControllerResource>,
         textures_resource: Res<TexturesResource>,
         time: &Res<Time>,
     ) {
         if self.lives < 1 {
             self.state = State::Over;
-            sceneController.game_over(time, player);
+            scene_controller.game_over(time, player);
         } else {
-            sceneController.respawn_player(
+            scene_controller.respawn_player(
                 commands,
-                textures_resource,
+                &textures_resource,
                 FutureTime::from_now(time, 0.5f64),
             );
         }
@@ -143,8 +155,8 @@ impl SceneControllerResource {
 
     fn respawn_player(
         &mut self,
-        mut commands: Commands,
-        textures_resource: Res<TexturesResource>,
+        commands: &mut Commands,
+        textures_resource: &Res<TexturesResource>,
         ft: FutureTime,
     ) {
         // This is where we shoot from on player.
@@ -185,6 +197,7 @@ impl SceneControllerResource {
             .insert(VelocityComponent {
                 v: Vec3::new(0f32, 0f32, 0f32),
                 max_speed: 300.0f32,
+                spin: 0.0f32
             })
             .insert(ShooterComponent {
                 max_bullets: 4,
@@ -211,20 +224,25 @@ impl SceneControllerResource {
 
         self.clear_asteroids();
         self.clear_aliens();
-        self.start_level(time);
+        self.start_level(&mut commands, &textures_resource, time);
         self.respawn_player(
-            commands,
-            textures_resource,
+            &mut commands,
+            &textures_resource,
             FutureTime::from_now(time, 0.5f64),
         );
     }
 
-    fn start_level(&mut self, time: &Res<Time>) {
+    fn start_level(
+        &mut self,
+        commands: &mut Commands,
+        textures_resource: &Res<TexturesResource>,
+        time: &Res<Time>,
+    ) {
         self.level += 1;
         self.jaw_interval_seconds = Duration::from_secs_f32(0.9f32);
         self.jaws_alternate = true;
-        self.next_jaws_sound_time = Some(FutureTime::from_now(time, 0.0f64));
-        self.add_asteroids(2 + self.level); // 3.0 + Mathf.Log( (float) Level)));
+        self.next_jaws_sound_time = Some(FutureTime::from_now(time, 1.0f64));
+        self.add_asteroids(2 + self.level, commands, textures_resource); // 3.0 + Mathf.Log( (float) Level)));
         self.last_asteroid_killed_at = Some(FutureTime::from_now(time, 15.0f64))
     }
 
@@ -235,7 +253,83 @@ impl SceneControllerResource {
         // TODO
     }
     fn clear_aliens(&mut self) {}
-    fn add_asteroids(&mut self, count: u32) {}
+
+    fn add_asteroids(
+        &mut self,
+        count: u32,
+        commands: &mut Commands,
+        textures_resource: &Res<TexturesResource>,
+    ) {
+        for ii in 0..count - 1 {
+            let pos = SceneControllerResource::make_safe_asteroid_pos();
+            SceneControllerResource::add_asteroid_with_size_at(
+                commands,
+                textures_resource,
+                AsteroidSize::Large,
+                pos,
+            )
+        }
+    }
+
+    fn add_asteroid_with_size_at(
+        commands: &mut Commands,
+        textures_resource: &Res<TexturesResource>,
+        size: AsteroidSize,
+        p: Vec3,
+    ) {
+
+        let index = match size {
+            AsteroidSize::Large => { textures_resource.asteroid_large_index}
+            AsteroidSize::Medium => { textures_resource.asteroid_medium_index }
+            AsteroidSize::Small => { textures_resource.asteroid_small_index }
+        };
+
+        commands
+            .spawn_bundle(SpriteSheetBundle {
+                texture_atlas: textures_resource.texture_atlas_handle.clone(), // TODO: How to avoid clone
+                sprite: TextureAtlasSprite::new(index),
+                transform: Transform {
+                    scale: Vec3::splat(1.0),
+                    translation: p,
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .insert(AsteroidComponent {
+                size,
+            })
+            .insert(Wrapped2dComponent)
+            .insert(RotatorComponent {
+                snap_angle: None,
+                angle_increment: (std::f32::consts::PI / 16.0f32),
+                rotate_speed: 4.0f32,
+            })
+            .insert(VelocityComponent {
+                v: Vec3::new(0f32, 0f32, 0f32),
+                max_speed: 300.0f32,
+                spin: 1.0f32
+            });
+        
+    }
+
+    // TODO
+    fn make_safe_asteroid_pos() -> Vec3 {
+        // Todo: Implement
+
+        //if (_player1 != null)
+        //{
+        //    var playerPos = _player1.transform.position;
+        //    for (int ii = 1; ii < 1000; ii++)
+        //    {
+        //        var astPos = MakeRandomPos();
+        //        if (Vector3.Distance(astPos, playerPos) > 2.0)
+        //        {
+        //            return astPos;
+        //        }
+        //    }
+        //}
+        make_random_pos()
+    }
 }
 
 #[derive(Component)]
@@ -261,6 +355,7 @@ struct ShooterComponent {
 struct VelocityComponent {
     pub v: Vec3,
     pub max_speed: f32, // magnitude.
+    pub spin: f32, // Spin/sec in radians.
 }
 
 impl VelocityComponent {
@@ -288,6 +383,17 @@ struct RotatorComponent {
     pub angle_increment: f32, // = 5.0f;
 }
 
+fn rotate_by_angle( t: &mut Transform, angle_to_rotate:f32) -> f32 {
+    let (_, _, cur_angle) = t.rotation.to_euler(EulerRot::XYZ);
+    let target_angle = cur_angle + angle_to_rotate;
+
+    // create the change in rotation around the Z axis (pointing through the 2d plane of the screen)
+    let rotation_delta = Quat::from_rotation_z(angle_to_rotate);
+    // update the ship rotation with our rotation delta
+    t.rotation *= rotation_delta;
+    return target_angle;
+}
+
 impl RotatorComponent {
     pub fn rotate_to_angle_with_snap(
         &mut self,
@@ -295,16 +401,9 @@ impl RotatorComponent {
         horz: f32,
         time: &Res<Time>,
     ) {
-        let (_, _, cur_angle) = transform.rotation.to_euler(EulerRot::XYZ); // cur angle in radians.
         if horz != 0.0f32 {
-            // Assume horz is 1.0 or -1.0
-            let angle_to_rotate = horz * self.rotate_speed * time.delta_seconds();
-            let target_angle = cur_angle + angle_to_rotate;
 
-            // create the change in rotation around the Z axis (pointing through the 2d plane of the screen)
-            let rotation_delta = Quat::from_rotation_z(angle_to_rotate);
-            // update the ship rotation with our rotation delta
-            transform.rotation *= rotation_delta;
+            let target_angle = rotate_by_angle( transform, horz * self.rotate_speed * time.delta_seconds() );
 
             // In case we have to stop, this will be the snap angle.
             let nearest = math::round_to_nearest_multiple(
@@ -352,6 +451,9 @@ struct TexturesResource {
     texture_atlas_handle: Handle<TextureAtlas>,
     player_index: usize,
     bullet_index: usize,
+    asteroid_large_index: usize,
+    asteroid_medium_index: usize,
+    asteroid_small_index: usize,
 }
 
 fn seed_rng() {
@@ -383,8 +485,8 @@ fn main() {
         //.add_plugin( RngPlugin)
 
         //.add_plugin( WindowPlugin { ..Default::default()})q
-        .add_plugin(LogDiagnosticsPlugin::default())
-        .add_plugin(FrameTimeDiagnosticsPlugin::default())
+        //.add_plugin(LogDiagnosticsPlugin::default())  // TODO - put behind a flag
+        //.add_plugin(FrameTimeDiagnosticsPlugin::default()) // TODO - put behind a flag
         .add_plugin(AudioPlugin)
         //  .insert_resource(Scoreboard { score: 0 })
         //.insert_resource(GameEntities {
@@ -456,16 +558,16 @@ pub fn new_camera_2d() -> OrthographicCameraBundle {
     };
     camera.transform.scale = Vec3::new(WIDTH, HEIGHT, 1.);
     //camera.transform.translation = Vec3::new( -400., -300., 0.);
-    return camera;
+    camera
 }
 
-fn setup<'a>(
+fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut texture_atlases: ResMut<Assets<TextureAtlas>>,
     mut textures_resource: ResMut<TexturesResource>,
-    scene_controller_resource: ResMut<SceneControllerResource>,
-    game_manager: ResMut<GameManagerResource>,
+    //scene_controller_resource: ResMut<SceneControllerResource>,
+    //game_manager: ResMut<GameManagerResource>,
 ) {
     audio_helper::prepare_audio(&mut commands, asset_server.as_ref());
 
@@ -491,14 +593,37 @@ fn setup<'a>(
         &mut texture_atlas,
         bevy::sprite::Rect {
             min: Vec2::new(9.0, 40.0),
-            max: Vec2::new(15.0, 46.0), // TODO
+            max: Vec2::new(15.0, 46.0), 
         },
     );
+
+    textures_resource.asteroid_large_index = TextureAtlas::add_texture(
+        &mut texture_atlas,
+        bevy::sprite::Rect {
+            min: Vec2::new(82.0, 4.0),
+            max: Vec2::new(126.0, 42.0),
+        },
+    );
+    textures_resource.asteroid_medium_index = TextureAtlas::add_texture(
+        &mut texture_atlas,
+        bevy::sprite::Rect {
+            min: Vec2::new(47.0, 4.0),
+            max: Vec2::new(71.0, 24.0),
+        },
+    );
+    textures_resource.asteroid_small_index = TextureAtlas::add_texture(
+        &mut texture_atlas,
+        bevy::sprite::Rect {
+            min: Vec2::new(29.0, 2.0),
+            max: Vec2::new(43.0, 15.0),
+        },
+    );
+
     //let texture_atlas = TextureAtlas::from_grid(texture_handle, Vec2::new(25.0,25.0),1,1);
 
     // Save for later.
     let ttad = texture_atlases.add(texture_atlas);
-    textures_resource.texture_atlas_handle = ttad.clone();
+    textures_resource.texture_atlas_handle = ttad;
 
     commands
         .spawn_bundle(TextBundle {
@@ -537,7 +662,6 @@ fn setup<'a>(
         .insert(FrameRateComponent);
 
     commands.spawn_bundle(TextBundle {
-        
         text: Text {
             sections: vec![TextSection {
                 value: "Game Over\n\n\nPress space to start\nCTRL to shoot\nL/R arrow keys to rotate\nup arrow for thrust\nenter for hyperspace".to_string(),
@@ -567,36 +691,36 @@ fn setup<'a>(
     .insert(GameOverComponent)
     .insert(Visibility { is_visible: false });
 
-    commands.spawn_bundle(TextBundle {
-        text: Text {
-            sections: vec![TextSection {
-                value: "0".to_string(),
-                style: TextStyle {
-                    font: asset_server.load("fonts/Hyperspace.otf"),
-                    font_size: 30.0,
-                    color: Color::rgb(1.0, 1.0, 1.0),
+    commands
+        .spawn_bundle(TextBundle {
+            text: Text {
+                sections: vec![TextSection {
+                    value: "0".to_string(),
+                    style: TextStyle {
+                        font: asset_server.load("fonts/Hyperspace.otf"),
+                        font_size: 30.0,
+                        color: Color::rgb(1.0, 1.0, 1.0),
+                    },
+                }],
+                alignment: TextAlignment {
+                    vertical: VerticalAlign::Center,
+                    horizontal: HorizontalAlign::Left,
                 },
-            }],
-            alignment: TextAlignment {
-                vertical: VerticalAlign::Center,
-                horizontal: HorizontalAlign::Left,
             },
-        },
-        style: Style {
-            align_self: AlignSelf::Auto,
-            position_type: PositionType::Absolute,
-            position: Rect {
-                top: Val::Percent(5.0f32),
-                left: Val::Percent(5.0f32),
+            style: Style {
+                align_self: AlignSelf::Auto,
+                position_type: PositionType::Absolute,
+                position: Rect {
+                    top: Val::Percent(2.0f32),
+                    left: Val::Percent(5.0f32),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             ..Default::default()
-        },
-        ..Default::default()
-    })
-    .insert(ScoreComponent)
-    .insert(Visibility { is_visible: true });
-
+        })
+        .insert(ScoreComponent)
+        .insert(Visibility { is_visible: true });
 }
 
 fn wrapped_2d_system(mut query: Query<(&Wrapped2dComponent, &mut Transform)>) {
@@ -628,7 +752,7 @@ fn auto_destroy_system(
     let now = time;
     let mut iter = query.iter();
     for (ee, ad) in &mut iter {
-        if ad.enabled && ad.when.is_after(&now) {
+        if ad.enabled && ad.when.is_expired(&now) {
             commands.entity(ee).despawn_recursive();
         }
     }
@@ -738,6 +862,8 @@ fn velocity_system(time: Res<Time>, mut query: Query<(&mut Transform, &VelocityC
     for (mut transform, velocity) in query.iter_mut() {
         //  Move forward in direction of velocity.
         transform.as_mut().translation += velocity.v * time.delta_seconds();
+
+        let _ = rotate_by_angle( &mut transform, velocity.spin * time.delta_seconds() );
     }
 }
 
@@ -765,7 +891,7 @@ fn fire_bullet_from_player(
             sprite: TextureAtlasSprite::new(textures.bullet_index),
             transform: Transform {
                 scale: Vec3::splat(1.0),
-                translation: muzzle_transform.translation.clone(), // TODO: This needs to be muzzle-child position.
+                translation: muzzle_transform.translation, 
                 ..Default::default()
             },
             ..Default::default()
@@ -776,29 +902,20 @@ fn fire_bullet_from_player(
         .insert(VelocityComponent {
             v: calc_player_normalized_pointing_dir(player_transform).mul(shooter.bullet_speed),
             max_speed: 5000.0f32, // TBD: Speed should be a struct
+            spin: 0.0f32
         })
+        .insert(Visibility { is_visible: true })
         .insert(Wrapped2dComponent {})
         .insert(AutoDestroyComponent {
             enabled: true,
-            when: FutureTime::from_now(time, 1.0f64),
+            when: FutureTime::from_now(time, 1.2f64),
         });
 
-    //TODO:
-
-    //newBullet.transform.position = MuzzleChild.transform.position;
-    //newBullet.transform.rotation = this.transform.rotation;
-    //newBullet.GetComponent<Rigidbody2D>().AddRelativeForce(Vector2.up*1.4f, ForceMode2D.Impulse);
-    //newBullet.gameObject.SetActive(true);
-
-    // GameManager.Instance.PlayClip(ShootSound);
-    // Destroy(newBullet.gameObject, 1.4f);
 }
 
 fn calc_player_normalized_pointing_dir(p: &Transform) -> Vec3 {
     let (_, _, angle_radians) = p.rotation.to_euler(EulerRot::XYZ);
-    let dir_vector = Vec3::new(-f32::sin(angle_radians), f32::cos(angle_radians), 0f32);
-
-    return dir_vector;
+    Vec3::new(-f32::sin(angle_radians), f32::cos(angle_radians), 0f32)
 }
 
 fn make_random_pos() -> Vec3 {
@@ -827,7 +944,6 @@ fn score_system(
         vis.is_visible = is_playing;
     }
 }
-
 
 fn frame_rate(
     time: Res<Time>,
@@ -866,13 +982,10 @@ fn scene_system(
             audio_helper::stop_looped_sound(&audio_helper::Tracks::Ambience, &audio, &audio_state);
 
             if keyboard_input.pressed(KeyCode::Space) {
-                // Try to prevent game starting right after previous if you keep firing.
-                if scene_controller.can_start_game(&time) {
-                    game_manager.lives = 4;
-                    game_manager.score = 0;
-                    game_manager.state = State::Playing;
-                    scene_controller.start_game(commands, textures_resource, game_manager, &time);
-                }
+                game_manager.lives = 4;
+                game_manager.score = 0;
+                game_manager.state = State::Playing;
+                scene_controller.start_game(commands, textures_resource, game_manager, &time);
             }
         }
     }
@@ -887,7 +1000,7 @@ fn scene_system(
         if scene_controller
             .next_jaws_sound_time
             .unwrap()
-            .is_after(time)
+            .is_expired(time)
         // if in level
         {
             if scene_controller.jaw_interval_seconds.as_secs_f32() > 0.1800f32 {
@@ -919,6 +1032,3 @@ fn scene_system(
     }
 }
 
-//struct Scoreboard {
-//    score: usize,
-//}
