@@ -82,6 +82,8 @@ struct PlayerComponent {
     pub last_hyperspace_time: f64,
 }
 
+#[derive(Component)]
+struct ScoreComponent;
 enum BulletSource {
     Player,
     Alien,
@@ -137,8 +139,6 @@ impl SceneControllerResource {
 
         //show_game_over( true);
         //show_instructions( true);
-
-        self.disable_start_button_until_time = Some(from_now(time, 1.5f64));
     }
 
     fn respawn_player(
@@ -226,13 +226,6 @@ impl SceneControllerResource {
         self.next_jaws_sound_time = Some(FutureTime::from_now(time, 0.0f64));
         self.add_asteroids(2 + self.level); // 3.0 + Mathf.Log( (float) Level)));
         self.last_asteroid_killed_at = Some(FutureTime::from_now(time, 15.0f64))
-    }
-
-    fn can_start_game(&mut self, time: &Res<Time>) -> bool {
-        match self.disable_start_button_until_time {
-            Some(dsbut) => dsbut.is_after(time),
-            None => true,
-        }
     }
 
     fn clear_bullets(&mut self) {
@@ -352,7 +345,6 @@ struct SceneControllerResource {
     jaw_interval_seconds: Duration,
     jaws_alternate: bool,
     last_asteroid_killed_at: Option<FutureTime>,
-    disable_start_button_until_time: Option<FutureTime>,
 }
 
 #[derive(Default, Clone)]
@@ -432,10 +424,11 @@ fn main() {
                 .with_run_criteria(FixedTimestep::step(TIME_STEP as f64))
                 .with_system(game_over_system)
                 .with_system(player_system)
-                .with_system(wrapped_2d)
+                .with_system(wrapped_2d_system)
                 .with_system(auto_destroy_system)
                 .with_system(velocity_system)
                 .with_system(scene_system)
+                .with_system(score_system)
                 //.with_system(paddle_movement_system)
                 //.with_system(ball_collision_system)
                 //.with_system(ball_movement_system),
@@ -544,6 +537,7 @@ fn setup<'a>(
         .insert(FrameRateComponent);
 
     commands.spawn_bundle(TextBundle {
+        
         text: Text {
             sections: vec![TextSection {
                 value: "Game Over\n\n\nPress space to start\nCTRL to shoot\nL/R arrow keys to rotate\nup arrow for thrust\nenter for hyperspace".to_string(),
@@ -559,11 +553,11 @@ fn setup<'a>(
             },
         },
         style: Style {
-            align_self: AlignSelf::Center,
+            align_self: AlignSelf::Auto,
             position_type: PositionType::Absolute,
             position: Rect {
                 top: Val::Percent(30.0f32),
-                left: Val::Percent(30.0f32),
+                left: Val::Percent(31.0f32), // TODO: Why do I have to guess?
                 ..Default::default()
             },
             ..Default::default()
@@ -572,19 +566,40 @@ fn setup<'a>(
     })
     .insert(GameOverComponent)
     .insert(Visibility { is_visible: false });
+
+    commands.spawn_bundle(TextBundle {
+        text: Text {
+            sections: vec![TextSection {
+                value: "0".to_string(),
+                style: TextStyle {
+                    font: asset_server.load("fonts/Hyperspace.otf"),
+                    font_size: 30.0,
+                    color: Color::rgb(1.0, 1.0, 1.0),
+                },
+            }],
+            alignment: TextAlignment {
+                vertical: VerticalAlign::Center,
+                horizontal: HorizontalAlign::Left,
+            },
+        },
+        style: Style {
+            align_self: AlignSelf::Auto,
+            position_type: PositionType::Absolute,
+            position: Rect {
+                top: Val::Percent(5.0f32),
+                left: Val::Percent(5.0f32),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    })
+    .insert(ScoreComponent)
+    .insert(Visibility { is_visible: true });
+
 }
 
-/// This system will then change the title during execution
-// fn change_title(time: Res<Time>, mut windows: ResMut<Windows>, fr: Res<FrameRate>) {
-//     let window = windows.get_primary_mut().unwrap();
-//     window.set_title(format!(
-//         "{} - Seconds since startup: {} FPS: {:.1}", PROJECT,
-//         time.seconds_since_startup().round(),
-//         fr.fps_last
-//     ));
-// }
-
-fn wrapped_2d(mut query: Query<(&Wrapped2dComponent, &mut Transform)>) {
+fn wrapped_2d_system(mut query: Query<(&Wrapped2dComponent, &mut Transform)>) {
     let cam_rect_right: f32 = WIDTH;
     let cam_rect_left: f32 = 0.0f32;
     let cam_rect_top = HEIGHT;
@@ -613,11 +628,8 @@ fn auto_destroy_system(
     let now = time;
     let mut iter = query.iter();
     for (ee, ad) in &mut iter {
-        if ad.enabled {
-            if ad.when.is_after(&now) {
-                println!("happened too soon.");
-                commands.entity(ee).despawn_recursive();
-            }
+        if ad.enabled && ad.when.is_after(&now) {
+            commands.entity(ee).despawn_recursive();
         }
     }
 }
@@ -636,7 +648,6 @@ fn player_system(
         &mut Transform,
         &mut VelocityComponent,
         &mut ShooterComponent,
-        //        &mut Rng,
     )>,
     bullet_query: Query<&BulletComponent>,
     muzzle_query: Query<(&MuzzleComponent, &GlobalTransform)>,
@@ -681,12 +692,6 @@ fn player_system(
             _exhaustParticleSystem.loop = true;
             _exhaustParticleSystem.Play();
         }
-        if (!_thrustAudioSource.isPlaying)
-        {
-            _thrustAudioSource.loop = true;
-            _thrustAudioSource.Play();
-            Debug.Assert(_thrustAudioSource.isPlaying);
-        }
         */
     } else {
         velocity.apply_friction(player.friction);
@@ -697,13 +702,6 @@ fn player_system(
         if (_exhaustParticleSystem.isPlaying)
         {
             _exhaustParticleSystem.Stop();
-        }
-
-
-        if (_thrustAudioSource.isPlaying)
-        {
-            _thrustAudioSource.Stop();
-            Debug.Assert(!_thrustAudioSource.isPlaying);
         }
         */
     }
@@ -719,7 +717,7 @@ fn player_system(
                 transform.as_ref(),
                 &mut commands,
                 &shooter,
-                &muzzle_transform,
+                muzzle_transform,
                 audio,
                 audio_state,
                 &time,
@@ -814,10 +812,22 @@ fn game_over_system(
     game_manager: Res<GameManagerResource>,
     mut query: Query<(&mut Visibility, &GameOverComponent)>,
 ) {
+    let is_over = game_manager.state == State::Over;
     for (mut vis, _) in query.iter_mut() {
-        vis.is_visible = game_manager.state == State::Over;
+        vis.is_visible = is_over;
     }
 }
+
+fn score_system(
+    game_manager: Res<GameManagerResource>,
+    mut query: Query<(&mut Visibility, &ScoreComponent)>,
+) {
+    let is_playing = game_manager.state == State::Playing;
+    for (mut vis, _) in query.iter_mut() {
+        vis.is_visible = is_playing;
+    }
+}
+
 
 fn frame_rate(
     time: Res<Time>,
@@ -838,7 +848,7 @@ fn frame_rate(
 }
 
 fn scene_system(
-    mut commands: Commands,
+    commands: Commands,
     mut scene_controller: ResMut<SceneControllerResource>,
     mut game_manager: ResMut<GameManagerResource>,
     keyboard_input: Res<Input<KeyCode>>,
@@ -874,8 +884,6 @@ fn scene_system(
         audio: &Res<Audio>,
         audio_state: &Res<audio_helper::AudioState>,
     ) {
-        // TODO: Lame that Time doesn't have a mehthod for this.
-
         if scene_controller
             .next_jaws_sound_time
             .unwrap()
