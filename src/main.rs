@@ -2,7 +2,6 @@
 
 use std::{ops::Mul, time::Duration};
 
-use audio_helper::Sounds;
 use bevy::{
     core::FixedTimestep,
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin}, //sprite::collide_aabb::{collide, Collision},
@@ -37,6 +36,31 @@ const TIME_STEP: f32 = 1.0 / 60.0;
 const PROJECT: &'static str = "AST4!";
 const WIDTH: f32 = 800.0f32;
 const HEIGHT: f32 = 600.0f32;
+const FREE_USER_AT: u32 = 10000;
+
+fn from_now(t: &Time, delta_sec: f64) -> FutureTime {
+    return FutureTime::from_now(t, delta_sec);
+}
+
+#[derive(Clone, Copy)]
+struct FutureTime {
+    seconds_since_startup: f64,
+}
+
+impl FutureTime {
+    fn from_now(t: &Time, sec: f64) -> FutureTime {
+        let now = t.seconds_since_startup();
+
+        let ft = FutureTime {
+            seconds_since_startup: now + sec,
+        };
+        return ft;
+    }
+
+    fn is_after(&self, t: &Time) -> bool {
+        self.seconds_since_startup < t.seconds_since_startup()
+    }
+}
 
 #[derive(Component)]
 struct GameOverComponent;
@@ -63,6 +87,102 @@ enum BulletSource {
     Alien,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum State {
+    Over,
+    Playing,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        State::Over
+    }
+}
+
+#[derive(Default, Clone)]
+struct GameManagerResource {
+    state: State,
+    score: u32,
+    lives: u32,
+    next_free_life_score: u32,
+}
+
+impl GameManagerResource {
+    fn player_killed(
+        &mut self,
+        player: &PlayerComponent,
+        sceneController: &mut ResMut<SceneControllerResource>,
+        time: &Res<Time>,
+    ) {
+        if self.lives < 1 {
+            self.state = State::Over;
+            sceneController.game_over(time, player);
+        } else {
+            sceneController.respawn_player(FutureTime::from_now(time, 0.5f64));
+        }
+    }
+}
+
+impl SceneControllerResource {
+    fn game_over(&mut self, time: &Res<Time>, player: &PlayerComponent) {
+        // todo: stop all sounds.
+
+        self.level = 0;
+
+        //show_game_over( true);
+        //show_instructions( true);
+
+        self.disable_start_button_until_time = Some(from_now(time, 1.5f64));
+    }
+
+    fn respawn_player(&mut self, ft: FutureTime) {
+        //todo
+    }
+
+    fn start_game(&mut self, mut game_manager: ResMut<GameManagerResource>, time: &Res<Time>) {
+        self.level = 0;
+        game_manager.next_free_life_score = FREE_USER_AT;
+
+        //self.show_game_over(false);
+        //self.show_instructions(false);
+        self.clear_bullets();
+
+        self.clear_asteroids();
+        self.clear_aliens();
+        self.start_level(time);
+        self.respawn_player(FutureTime::from_now(time, 0.5f64));
+    }
+
+    fn start_level(&mut self, time: &Res<Time>) {
+        self.level += 1;
+        self.jaw_interval_seconds = Duration::from_secs_f32(0.9f32);
+        self.jaws_alternate = true;
+        self.next_jaws_sound_time = Some(FutureTime::from_now(time, 0.0f64));
+        self.add_asteroids(2 + self.level); // 3.0 + Mathf.Log( (float) Level)));
+        self.last_asteroid_killed_at = Some(FutureTime::from_now(time, 15.0f64))
+    }
+
+    fn can_start_game(&mut self, time: &Res<Time>) -> bool {
+        match self.disable_start_button_until_time {
+            Some(dsbut) => {
+                dsbut.is_after(time)
+            }
+            None => {
+                true
+            }
+        }
+    }
+
+    fn clear_bullets(&mut self) {
+        // TODO
+    }
+    fn clear_asteroids(&mut self) {
+        // TODO
+    }
+    fn clear_aliens(&mut self) {}
+    fn add_asteroids(&mut self, count: u32) {}
+}
+
 #[derive(Component)]
 struct BulletComponent {
     source: BulletSource,
@@ -70,14 +190,8 @@ struct BulletComponent {
 
 #[derive(Component)]
 struct AutoDestroyComponent {
-    when: std::time::Instant,
+    when: FutureTime,
     enabled: bool,
-}
-
-impl AutoDestroyComponent {
-    pub fn make_time(seconds: f32) -> std::time::Instant {
-        return std::time::Instant::now() + std::time::Duration::from_secs_f32(seconds);
-    }
 }
 
 // TODO: will we really use this on the alien? Maybe max_bullets should just be on the shooter.
@@ -100,7 +214,7 @@ impl VelocityComponent {
         let (_, _, angle_radians) = direction.to_euler(EulerRot::XYZ);
         let thrust_vector =
             thrust * Vec3::new(-f32::sin(angle_radians), f32::cos(angle_radians), 0f32);
-        self.v = self.v + thrust_vector; // * time.delta_seconds();
+        self.v += thrust_vector; // * time.delta_seconds();
         self.v = self.v.clamp_length_max(self.max_speed);
     }
 
@@ -147,13 +261,10 @@ impl RotatorComponent {
             self.snap_angle = Some(nearest);
         } else {
             // When button released, snap to next angle.
-            match self.snap_angle {
-                Some(snap_angle) => {
-                    transform.rotation = Quat::from_rotation_z(snap_angle);
-                    self.snap_angle = None;
-                }
-                None => {}
-            }
+            if let Some(snap_angle) = self.snap_angle {
+                            transform.rotation = Quat::from_rotation_z(snap_angle);
+                               self.snap_angle = None;
+                           }
         }
     }
 }
@@ -165,15 +276,21 @@ struct FrameRateResource {
     fps_last: f64,
 }
 
+#[derive(Default, Clone)]
 struct GameStateResource {
     level: u32,
     next_free_life_score: u64,
 }
 
+// todo: not sure why this isn't part of gamestate.
+#[derive(Default, Clone)]
 struct SceneControllerResource {
-    next_jaws_sound_time: std::time::Instant,
+    level: u32,
+    next_jaws_sound_time: Option<FutureTime>,
     jaw_interval_seconds: Duration,
     jaws_alternate: bool,
+    last_asteroid_killed_at: Option<FutureTime>,
+    disable_start_button_until_time: Option<FutureTime>,
 }
 
 #[derive(Default, Clone)]
@@ -219,10 +336,19 @@ fn main() {
         //.insert_resource(GameEntities {
         //    game_over_entity: None,
         //})
+        .insert_resource( SceneControllerResource {
+            ..Default::default()
+        })
+        .insert_resource( GameManagerResource {
+            state: State::Over,
+            ..Default::default()
+
+        })
         .insert_resource(SceneControllerResource {
             jaw_interval_seconds: Duration::from_secs_f32(0.9f32),
             jaws_alternate: false,
-            next_jaws_sound_time: std::time::Instant::now(),
+            next_jaws_sound_time: None,
+            ..Default::default()
         })
         .insert_resource(FrameRateResource {
             delta_time: 0f64,
@@ -242,7 +368,7 @@ fn main() {
         .add_system_set(
             SystemSet::new()
                 .with_run_criteria(FixedTimestep::step(TIME_STEP as f64))
-                //.add_system(game_over_system)
+                .with_system(game_over_system)
                 .with_system(player_system)
                 .with_system(wrapped_2d)
                 .with_system(auto_destroy_system)
@@ -283,6 +409,8 @@ fn setup<'a>(
     asset_server: Res<AssetServer>,
     mut texture_atlases: ResMut<Assets<TextureAtlas>>,
     mut textures_resource: ResMut<TexturesResource>,
+    scene_controller_resource: ResMut<SceneControllerResource>,
+    game_manager: ResMut<GameManagerResource>,
 ) {
     audio_helper::prepare_audio(&mut commands, asset_server.as_ref());
 
@@ -349,7 +477,7 @@ fn setup<'a>(
         .insert(Wrapped2dComponent)
         .insert(RotatorComponent {
             snap_angle: None,
-            angle_increment: (3.141592654f32 / 16.0f32),
+            angle_increment: (std::f32::consts::PI / 16.0f32),
             rotate_speed: 4.0f32,
         })
         .insert(VelocityComponent {
@@ -424,7 +552,10 @@ fn setup<'a>(
             },
             ..Default::default()
         })
-        .insert(GameOverComponent);
+        .insert(GameOverComponent)
+        .insert(Visibility { is_visible: false })
+        ;
+
 }
 
 /// This system will then change the title during execution
@@ -458,13 +589,17 @@ fn wrapped_2d(mut query: Query<(&Wrapped2dComponent, &mut Transform)>) {
 }
 
 // TODO: Make this work in debugger by actually count time.
-fn auto_destroy_system(mut commands: Commands, query: Query<(Entity, &mut AutoDestroyComponent)>) {
-    let now = std::time::Instant::now();
-
+fn auto_destroy_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    query: Query<(Entity, &mut AutoDestroyComponent)>,
+) {
+    let now = time;
     let mut iter = query.iter();
     for (ee, ad) in &mut iter {
         if ad.enabled {
-            if now > ad.when {
+            if ad.when.is_after(&now) {
+                println!("happened too soon.");
                 commands.entity(ee).despawn_recursive();
             }
         }
@@ -569,6 +704,7 @@ fn player_system(
                 &muzzle_transform,
                 audio,
                 audio_state,
+                &time,
             );
         }
     }
@@ -598,6 +734,7 @@ fn fire_bullet_from_player(
     muzzle_transform: &GlobalTransform,
     audio: Res<Audio>,
     audio_state: Res<audio_helper::AudioState>,
+    time: &Res<Time>,
 ) {
     audio_helper::play_single_sound(
         &audio_helper::Tracks::Game,
@@ -622,12 +759,12 @@ fn fire_bullet_from_player(
         })
         .insert(VelocityComponent {
             v: calc_player_normalized_pointing_dir(player_transform).mul(shooter.bullet_speed),
-            max_speed: 5000.0f32,
+            max_speed: 5000.0f32, // TBD: Speed should be a struct
         })
         .insert(Wrapped2dComponent {})
         .insert(AutoDestroyComponent {
             enabled: true,
-            when: AutoDestroyComponent::make_time(1.0f32),
+            when: FutureTime::from_now(time, 1.0f64),
         });
 
     //TODO:
@@ -654,8 +791,13 @@ fn make_random_pos() -> Vec3 {
     return Vec3::new(x * WIDTH, y * HEIGHT, 0f32);
 }
 
-fn game_over_system(_: Query<(&Text, &GameOverComponent)>) {
-    println!("Game over");
+fn game_over_system(
+    gameManager: Res<GameManagerResource>,
+    mut query: Query<(&mut Visibility, &GameOverComponent)>,
+) {
+    let (mut vis, _) = query.single_mut();
+
+    vis.is_visible = gameManager.state == State::Over;
 }
 
 fn frame_rate(
@@ -670,56 +812,81 @@ fn frame_rate(
         // TODO
     }
 
-    if fr.display_frame_rate || true {
+    if fr.display_frame_rate  {
         let (mut text, _) = query.single_mut();
         text.sections[1].value = format!("{:.1}", fr.fps_last);
     }
 }
 
 fn scene_system(
-    time: Res<Time>,
     mut scene_controller: ResMut<SceneControllerResource>,
+    mut game_manager: ResMut<GameManagerResource>,
+    keyboard_input: Res<Input<KeyCode>>,
+    time: Res<Time>,
     audio: Res<Audio>,
     audio_state: Res<audio_helper::AudioState>,
 ) {
-    update_jaws_sound(&time, &mut scene_controller, &audio, &audio_state);
-}
-
-// TODO: Make impl method on the scene controller.
-fn update_jaws_sound(
-    time: &Res<Time>,
-    scene_controller: &mut ResMut<SceneControllerResource>,
-    audio: &Res<Audio>,
-    audio_state: &Res<audio_helper::AudioState>,
-) {
-    // TODO: Lame that Time doesn't have a mehthod for this.
-    let now = time.startup() + time.time_since_startup();
-
-    if now > scene_controller.next_jaws_sound_time
-    // if in level
-    {
-        if scene_controller.jaw_interval_seconds.as_secs_f32() > 0.1800f32 {
-            scene_controller.jaw_interval_seconds = Duration::from_secs_f32(
-                scene_controller.jaw_interval_seconds.as_secs_f32() - 0.005f32,
-            );
+    match game_manager.state {
+        State::Playing => {
+            update_ambience_sound(&time, scene_controller, &audio, &audio_state);
         }
-        scene_controller.next_jaws_sound_time = now + scene_controller.jaw_interval_seconds;
-        if scene_controller.jaws_alternate {
-            audio_helper::play_single_sound(
-                &audio_helper::Tracks::Ambience,
-                &audio_helper::Sounds::Beat1,
-                audio,
-                audio_state,
-            );
-        } else {
-            audio_helper::play_single_sound(
-                &audio_helper::Tracks::Ambience,
-                &audio_helper::Sounds::Beat2,
-                audio,
-                audio_state,
-            );
+        State::Over => {
+            // TODO: Turn off jaws sounds.
+            audio_helper::stop_looped_sound(&audio_helper::Tracks::Ambience, &audio, &audio_state);
+
+            if keyboard_input.pressed(KeyCode::Space) {
+                // Try to prevent game starting right after previous if you keep firing.
+                if scene_controller.can_start_game(&time) {
+                    game_manager.lives = 4;
+                    game_manager.score = 0;
+                    game_manager.state = State::Playing;
+                    scene_controller.start_game(game_manager, &time);
+                }
+            }
         }
-        scene_controller.jaws_alternate = !scene_controller.jaws_alternate;
+    }
+
+    // TODO: Make impl method on the scene controller.
+    fn update_ambience_sound(
+        time: &Res<Time>,
+        mut scene_controller: ResMut<SceneControllerResource>,
+        audio: &Res<Audio>,
+        audio_state: &Res<audio_helper::AudioState>,
+    ) {
+        // TODO: Lame that Time doesn't have a mehthod for this.
+
+        if scene_controller
+            .next_jaws_sound_time
+            .unwrap()
+            .is_after(time)
+        // if in level
+        {
+            if scene_controller.jaw_interval_seconds.as_secs_f32() > 0.1800f32 {
+                scene_controller.jaw_interval_seconds = Duration::from_secs_f32(
+                    scene_controller.jaw_interval_seconds.as_secs_f32() - 0.005f32,
+                );
+            }
+            scene_controller.next_jaws_sound_time = Some(FutureTime::from_now(
+                time,
+                scene_controller.jaw_interval_seconds.as_secs_f64(),
+            ));
+            if scene_controller.jaws_alternate {
+                audio_helper::play_single_sound(
+                    &audio_helper::Tracks::Ambience,
+                    &audio_helper::Sounds::Beat1,
+                    audio,
+                    audio_state,
+                );
+            } else {
+                audio_helper::play_single_sound(
+                    &audio_helper::Tracks::Ambience,
+                    &audio_helper::Sounds::Beat2,
+                    audio,
+                    audio_state,
+                );
+            }
+            scene_controller.jaws_alternate = !scene_controller.jaws_alternate;
+        }
     }
 }
 

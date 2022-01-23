@@ -42,23 +42,12 @@ pub struct AudioState {
     // Tracks/channel. For now, we don't need to keep data about each channel (ChannelAudioState)
     audio_tracks: HashMap<Tracks, AudioChannel>,
 }
-
+#[derive(Default)]
 struct ChannelAudioState {
     //stopped: bool,
 //paused: bool,
 //loop_started: bool,
 //volume: f32,
-}
-
-impl Default for ChannelAudioState {
-    fn default() -> Self {
-        ChannelAudioState {
-            //volume: 1.0,
-            //stopped: true,
-            //loop_started: false,
-            //paused: false,
-        }
-    }
 }
 
 pub fn start_looped_sound(
