@@ -15,6 +15,8 @@ bevy_window="0.6.0"
 bevy_winit="0.6.0"
 fastrand="1.6.0"
 
+quadtree_rs="0.1.2"
+
 # Dependencies for WASM only.
 #[target.'cfg(target_arch = "wasm32")'.dependencies]
 #bevy = { version = "0.6", default-features = false, features = ["bevy_gltf", "bevy_winit", "render", "png"] }

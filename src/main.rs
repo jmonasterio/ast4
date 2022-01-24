@@ -43,9 +43,19 @@ struct FutureTime {
     seconds_since_startup_to_auto_destroy: f64,
 }
 
+struct AsteroidCollisionEvent {
+    asteroid: Entity,
+    hit_by: Entity,
+}
+
+struct PlayerCollisionEvent {
+    player: Entity,
+    hit_by: Entity,
+}
+
 impl FutureTime {
     fn from_now(t: &Time, sec: f64) -> FutureTime {
-        assert!( sec >= 0f64);
+        assert!(sec >= 0f64);
         let now = t.seconds_since_startup();
         let future = now + sec;
 
@@ -77,6 +87,11 @@ struct AsteroidComponent {
 }
 
 #[derive(Component)]
+struct AlienComponent {
+    size: AlienSize,
+}
+
+#[derive(Component)]
 struct MuzzleComponent;
 
 #[derive(Component, Default)]
@@ -88,7 +103,6 @@ struct PlayerComponent {
     pub snap_angle: Option<f32>,
     pub rotate_speed: f32,    //= 150f;
     pub angle_increment: f32, // = 5.0f;
-
 }
 
 #[derive(Component)]
@@ -102,6 +116,12 @@ enum BulletSource {
 enum AsteroidSize {
     Large,
     Medium,
+    Small,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum AlienSize {
+    Large,
     Small,
 }
 
@@ -199,7 +219,7 @@ impl SceneControllerResource {
             .insert(VelocityComponent {
                 v: Vec3::new(0f32, 0f32, 0f32),
                 max_speed: 300.0f32,
-                spin: 0.0f32
+                spin: 0.0f32,
             })
             .insert(ShooterComponent {
                 max_bullets: 4,
@@ -280,11 +300,10 @@ impl SceneControllerResource {
         size: AsteroidSize,
         p: Vec3,
     ) {
-
         let index = match size {
-            AsteroidSize::Large => { textures_resource.asteroid_large_index}
-            AsteroidSize::Medium => { textures_resource.asteroid_medium_index }
-            AsteroidSize::Small => { textures_resource.asteroid_small_index }
+            AsteroidSize::Large => textures_resource.asteroid_large_index,
+            AsteroidSize::Medium => textures_resource.asteroid_medium_index,
+            AsteroidSize::Small => textures_resource.asteroid_small_index,
         };
 
         commands
@@ -298,16 +317,13 @@ impl SceneControllerResource {
                 },
                 ..Default::default()
             })
-            .insert(AsteroidComponent {
-                size,
-            })
+            .insert(AsteroidComponent { size })
             .insert(Wrapped2dComponent)
             .insert(VelocityComponent {
-                v: make_random_velocity( 300f32),
+                v: make_random_velocity(300f32),
                 max_speed: 300.0f32,
-                spin: 1.0f32
+                spin: 1.0f32,
             });
-        
     }
 
     // TODO
@@ -353,7 +369,7 @@ struct ShooterComponent {
 struct VelocityComponent {
     pub v: Vec3,
     pub max_speed: f32, // magnitude.
-    pub spin: f32, // Spin/sec in radians.
+    pub spin: f32,      // Spin/sec in radians.
 }
 
 impl VelocityComponent {
@@ -374,8 +390,7 @@ impl VelocityComponent {
     }
 }
 
-
-fn rotate_by_angle( t: &mut Transform, angle_to_rotate:f32) -> f32 {
+fn rotate_by_angle(t: &mut Transform, angle_to_rotate: f32) -> f32 {
     let (_, _, cur_angle) = t.rotation.to_euler(EulerRot::XYZ);
     let target_angle = cur_angle + angle_to_rotate;
 
@@ -385,7 +400,6 @@ fn rotate_by_angle( t: &mut Transform, angle_to_rotate:f32) -> f32 {
     t.rotation *= rotation_delta;
     return target_angle;
 }
-
 
 struct FrameRateResource {
     pub display_frame_rate: bool,
@@ -456,6 +470,8 @@ fn main() {
         //.insert_resource(GameEntities {
         //    game_over_entity: None,
         //})
+        .add_event::<AsteroidCollisionEvent>()
+        .add_event::<PlayerCollisionEvent>()
         .insert_resource( SceneControllerResource {
             ..Default::default()
         })
@@ -495,6 +511,9 @@ fn main() {
                 .with_system(velocity_system)
                 .with_system(scene_system)
                 .with_system(score_system)
+                .with_system(collision_system)
+                .with_system(asteroid_collision_system)
+                .with_system(player_collision_system)
                 //.with_system(paddle_movement_system)
                 //.with_system(ball_collision_system)
                 //.with_system(ball_movement_system),
@@ -557,7 +576,7 @@ fn setup(
         &mut texture_atlas,
         bevy::sprite::Rect {
             min: Vec2::new(9.0, 40.0),
-            max: Vec2::new(15.0, 46.0), 
+            max: Vec2::new(15.0, 46.0),
         },
     );
 
@@ -821,42 +840,41 @@ fn player_system(
     }
 }
 
-impl  PlayerComponent {
-pub fn rotate_to_angle_with_snap(
-    &mut self,
-    transform: &mut Transform,
-    horz: f32,
-    time: &Res<Time>,
-) {
-    if horz != 0.0f32 {
+impl PlayerComponent {
+    pub fn rotate_to_angle_with_snap(
+        &mut self,
+        transform: &mut Transform,
+        horz: f32,
+        time: &Res<Time>,
+    ) {
+        if horz != 0.0f32 {
+            let target_angle =
+                rotate_by_angle(transform, horz * self.rotate_speed * time.delta_seconds());
 
-        let target_angle = rotate_by_angle( transform, horz * self.rotate_speed * time.delta_seconds() );
+            // In case we have to stop, this will be the snap angle.
+            let nearest = math::round_to_nearest_multiple(
+                target_angle + horz * self.angle_increment, // tbd: this may be laggy.
+                self.angle_increment,
+            );
 
-        // In case we have to stop, this will be the snap angle.
-        let nearest = math::round_to_nearest_multiple(
-            target_angle + horz * self.angle_increment, // tbd: this may be laggy.
-            self.angle_increment,
-        );
-
-        // Snap to this angle on next frame if button released.
-        self.snap_angle = Some(nearest);
-    } else {
-        // When button released, snap to next angle.
-        if let Some(snap_angle) = self.snap_angle {
-            transform.rotation = Quat::from_rotation_z(snap_angle);
-            self.snap_angle = None;
+            // Snap to this angle on next frame if button released.
+            self.snap_angle = Some(nearest);
+        } else {
+            // When button released, snap to next angle.
+            if let Some(snap_angle) = self.snap_angle {
+                transform.rotation = Quat::from_rotation_z(snap_angle);
+                self.snap_angle = None;
+            }
         }
     }
 }
-}
-
 
 fn velocity_system(time: Res<Time>, mut query: Query<(&mut Transform, &VelocityComponent)>) {
     for (mut transform, velocity) in query.iter_mut() {
         //  Move forward in direction of velocity.
         transform.as_mut().translation += velocity.v * time.delta_seconds();
 
-        let _ = rotate_by_angle( &mut transform, velocity.spin * time.delta_seconds() );
+        let _ = rotate_by_angle(&mut transform, velocity.spin * time.delta_seconds());
     }
 }
 
@@ -884,7 +902,7 @@ fn fire_bullet_from_player(
             sprite: TextureAtlasSprite::new(textures.bullet_index),
             transform: Transform {
                 scale: Vec3::splat(1.0),
-                translation: muzzle_transform.translation, 
+                translation: muzzle_transform.translation,
                 ..Default::default()
             },
             ..Default::default()
@@ -895,7 +913,7 @@ fn fire_bullet_from_player(
         .insert(VelocityComponent {
             v: calc_player_normalized_pointing_dir(player_transform).mul(shooter.bullet_speed),
             max_speed: 5000.0f32, // TBD: Speed should be a struct
-            spin: 0.0f32
+            spin: 0.0f32,
         })
         .insert(Visibility { is_visible: true })
         .insert(Wrapped2dComponent {})
@@ -903,7 +921,6 @@ fn fire_bullet_from_player(
             enabled: true,
             when: FutureTime::from_now(time, 1.2f64),
         });
-
 }
 
 fn calc_player_normalized_pointing_dir(p: &Transform) -> Vec3 {
@@ -917,13 +934,12 @@ fn make_random_pos() -> Vec3 {
     Vec3::new(x * WIDTH, y * HEIGHT, 0f32)
 }
 
-fn make_random_velocity( max_speed: f32) -> Vec3 {
+fn make_random_velocity(max_speed: f32) -> Vec3 {
     let x = fastrand::f32();
     let y = fastrand::f32();
     let speed = fastrand::f32() * max_speed;
     speed * Vec3::new(x, y, 0f32)
 }
-
 
 // Show or hide instructions based on game state.
 fn game_over_system(
@@ -1033,3 +1049,136 @@ fn scene_system(
     }
 }
 
+// Not easy-to-use physics like unity, so had to implement my own
+
+fn collision_system(
+    mut commands: Commands,
+    mut ev_asteroid_collision: EventWriter<AsteroidCollisionEvent>, // TODO: Can I have two type params, like ASTERID?
+    mut ev_player_collision: EventWriter<PlayerCollisionEvent>,
+    bullet_query: Query<(Entity, &BulletComponent, &Transform)>, // Todo, ColliderComponent in each bullet (etc), would contain info about collision size.
+    player_query: Query<(Entity, &PlayerComponent, &Transform)>,
+    asteroid_query: Query<(Entity, &AsteroidComponent, &Transform)>,
+    alient_query: Query<(Entity, &AlienComponent, &Transform)>,
+) {
+    // Detect:
+    //  player -> bullet
+    //  alien -> bullet
+
+    //  player -> asteroid
+    //  alien -> asteroid
+    //  bullet -> asteroid
+
+    // So if I had a quadtree of Bullets and quadtree of Asteroids.
+    use quadtree_rs::{area::AreaBuilder, point::Point, Quadtree};
+    let mut bullet_qt = Quadtree::<i16, usize>::new(10); /*Depth, allows coordinates up to 1024);*/
+    assert!(bullet_qt.width() > WIDTH as usize);
+    assert!(bullet_qt.height() > HEIGHT as usize);
+
+    let mut asteroid_qt = Quadtree::<i16, usize>::new(10); /*Depth, allows coordinates up to 1024);*/
+    assert!(asteroid_qt.width() > WIDTH as usize);
+    assert!(asteroid_qt.height() > HEIGHT as usize);
+
+    // Copy iterators into arrays for indexable access
+    let bullet_array: Vec<(Entity, &BulletComponent, &Transform)> = bullet_query.iter().collect();
+    let player_array: Vec<(Entity, &PlayerComponent, &Transform)> = player_query.iter().collect();
+    assert!(player_array.len() <= 1);
+    let asteroid_array: Vec<(Entity, &AsteroidComponent, &Transform)> =
+        asteroid_query.iter().collect();
+    let alien_array: Vec<(Entity, &AlienComponent, &Transform)> = alient_query.iter().collect();
+
+    fn make_area_around(t: &Transform, radius: f32) -> quadtree_rs::area::Area<i16> {
+        let r = radius as i16;
+        let one_half_r = r / 2;
+        AreaBuilder::default()
+            .anchor(Point {
+                x: t.translation.x as i16 - one_half_r,
+                y: t.translation.y as i16 - one_half_r,
+            })
+            .dimensions((r, r))
+            .build()
+            .unwrap()
+    }
+
+    for (idx, (_, _, t)) in bullet_array.iter().enumerate() {
+        bullet_qt.insert_pt(
+            Point {
+                x: t.translation.x as i16,
+                y: t.translation.y as i16,
+            },
+            idx,
+        );
+    }
+    for (idx, (_, _, t)) in asteroid_array.iter().enumerate() {
+        asteroid_qt.insert_pt(
+            Point {
+                x: t.translation.x as i16,
+                y: t.translation.y as i16,
+            },
+            idx,
+        );
+    }
+
+    for (bul_ent, _, t) in &bullet_array {
+        let near_bullet_area = make_area_around(t, 25.0f32);
+        for entry in asteroid_qt.query(near_bullet_area) {
+            let idx = entry.value_ref();
+            let (ast_ent, _, _) = asteroid_array[*idx];
+
+            commands.entity(*bul_ent).despawn_recursive();
+            ev_asteroid_collision.send(AsteroidCollisionEvent {
+                asteroid: ast_ent,
+                hit_by: *bul_ent,
+            });
+        }
+    }
+
+    for (player_ent, _, t) in &player_array {
+        let near_bullet_area = make_area_around(t, 25.0f32);
+        for entry in asteroid_qt.query(near_bullet_area) {
+            let idx = entry.value_ref();
+            let (ast_ent, _, _) = asteroid_array[*idx];
+
+            ev_player_collision.send(PlayerCollisionEvent {
+                player: *player_ent,
+                hit_by: ast_ent,
+            });
+            ev_asteroid_collision.send(AsteroidCollisionEvent {
+                asteroid: ast_ent,
+                hit_by: *player_ent,
+            });
+        }
+    }
+}
+
+// TODO: Can this be part of the regular asteroid_system?
+// TODO: Split asteroid into smaller parts, or destroy it. Show explosions.
+fn asteroid_collision_system(
+    mut commands: Commands,
+    mut ev_collision: EventReader<AsteroidCollisionEvent>,
+) {
+    for ev in ev_collision.iter() {
+        // The entity may no longer exist, if it was deleted by some other thing already.
+        /*if let Some(_) = world.unwrap().get_entity(ev.asteroid)*/
+        {
+            let cc = commands.entity(ev.asteroid);
+            cc.despawn_recursive();
+        }
+    }
+}
+
+use std::panic;
+
+// TODO: Lifes,etc.
+fn player_collision_system(
+    mut commands: Commands,
+    mut ev_collision: EventReader<PlayerCollisionEvent>,
+) {
+    for ev in ev_collision.iter() {
+        // The entity may no longer exist, if it was deleted by some other thing already.
+        /*if let Some(_) = world.unwrap().get_entity(ev.player) */
+        {
+            let cc = commands.entity(ev.player);
+            cc.despawn_recursive();
+        }
+    }
+}
