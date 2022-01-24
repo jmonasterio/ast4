@@ -85,6 +85,10 @@ struct PlayerComponent {
     // TODO: pub player_index: u8, // Or 1, for 2 players
     pub friction: f32,
     pub last_hyperspace_time: f64,
+    pub snap_angle: Option<f32>,
+    pub rotate_speed: f32,    //= 150f;
+    pub angle_increment: f32, // = 5.0f;
+
 }
 
 #[derive(Component)]
@@ -187,13 +191,11 @@ impl SceneControllerResource {
                 thrust: 2.0f32,
                 friction: 0.98f32,
                 last_hyperspace_time: 0f64,
-            })
-            .insert(Wrapped2dComponent)
-            .insert(RotatorComponent {
                 snap_angle: None,
                 angle_increment: (std::f32::consts::PI / 16.0f32),
                 rotate_speed: 4.0f32,
             })
+            .insert(Wrapped2dComponent)
             .insert(VelocityComponent {
                 v: Vec3::new(0f32, 0f32, 0f32),
                 max_speed: 300.0f32,
@@ -271,6 +273,7 @@ impl SceneControllerResource {
         }
     }
 
+    // TODO: Load a mirrored verion of asteroid, so not all the same.
     fn add_asteroid_with_size_at(
         commands: &mut Commands,
         textures_resource: &Res<TexturesResource>,
@@ -299,13 +302,8 @@ impl SceneControllerResource {
                 size,
             })
             .insert(Wrapped2dComponent)
-            .insert(RotatorComponent {
-                snap_angle: None,
-                angle_increment: (std::f32::consts::PI / 16.0f32),
-                rotate_speed: 4.0f32,
-            })
             .insert(VelocityComponent {
-                v: Vec3::new(0f32, 0f32, 0f32),
+                v: make_random_velocity( 300f32),
                 max_speed: 300.0f32,
                 spin: 1.0f32
             });
@@ -376,12 +374,6 @@ impl VelocityComponent {
     }
 }
 
-#[derive(Component, Default)]
-struct RotatorComponent {
-    pub snap_angle: Option<f32>,
-    pub rotate_speed: f32,    //= 150f;
-    pub angle_increment: f32, // = 5.0f;
-}
 
 fn rotate_by_angle( t: &mut Transform, angle_to_rotate:f32) -> f32 {
     let (_, _, cur_angle) = t.rotation.to_euler(EulerRot::XYZ);
@@ -394,34 +386,6 @@ fn rotate_by_angle( t: &mut Transform, angle_to_rotate:f32) -> f32 {
     return target_angle;
 }
 
-impl RotatorComponent {
-    pub fn rotate_to_angle_with_snap(
-        &mut self,
-        transform: &mut Transform,
-        horz: f32,
-        time: &Res<Time>,
-    ) {
-        if horz != 0.0f32 {
-
-            let target_angle = rotate_by_angle( transform, horz * self.rotate_speed * time.delta_seconds() );
-
-            // In case we have to stop, this will be the snap angle.
-            let nearest = math::round_to_nearest_multiple(
-                target_angle + horz * self.angle_increment, // tbd: this may be laggy.
-                self.angle_increment,
-            );
-
-            // Snap to this angle on next frame if button released.
-            self.snap_angle = Some(nearest);
-        } else {
-            // When button released, snap to next angle.
-            if let Some(snap_angle) = self.snap_angle {
-                transform.rotation = Quat::from_rotation_z(snap_angle);
-                self.snap_angle = None;
-            }
-        }
-    }
-}
 
 struct FrameRateResource {
     pub display_frame_rate: bool,
@@ -768,7 +732,6 @@ fn player_system(
     audio_state: Res<audio_helper::AudioState>,
     mut query: Query<(
         &mut PlayerComponent,
-        &mut RotatorComponent,
         &mut Transform,
         &mut VelocityComponent,
         &mut ShooterComponent,
@@ -780,7 +743,7 @@ fn player_system(
     if query.is_empty() || game_manager.state == State::Over {
         return; // No player.
     }
-    let (mut player, mut rotator, mut transform, mut velocity, shooter) = query.single_mut();
+    let (mut player, mut transform, mut velocity, shooter) = query.single_mut();
 
     let mut dir = 0.0f32;
     if keyboard_input.pressed(KeyCode::Left) {
@@ -789,7 +752,7 @@ fn player_system(
     if keyboard_input.pressed(KeyCode::Right) {
         dir += -1.0f32;
     }
-    rotator.rotate_to_angle_with_snap(&mut transform, dir, &time);
+    player.rotate_to_angle_with_snap(&mut transform, dir, &time);
 
     let mut vert = 0.0f32;
 
@@ -858,6 +821,36 @@ fn player_system(
     }
 }
 
+impl  PlayerComponent {
+pub fn rotate_to_angle_with_snap(
+    &mut self,
+    transform: &mut Transform,
+    horz: f32,
+    time: &Res<Time>,
+) {
+    if horz != 0.0f32 {
+
+        let target_angle = rotate_by_angle( transform, horz * self.rotate_speed * time.delta_seconds() );
+
+        // In case we have to stop, this will be the snap angle.
+        let nearest = math::round_to_nearest_multiple(
+            target_angle + horz * self.angle_increment, // tbd: this may be laggy.
+            self.angle_increment,
+        );
+
+        // Snap to this angle on next frame if button released.
+        self.snap_angle = Some(nearest);
+    } else {
+        // When button released, snap to next angle.
+        if let Some(snap_angle) = self.snap_angle {
+            transform.rotation = Quat::from_rotation_z(snap_angle);
+            self.snap_angle = None;
+        }
+    }
+}
+}
+
+
 fn velocity_system(time: Res<Time>, mut query: Query<(&mut Transform, &VelocityComponent)>) {
     for (mut transform, velocity) in query.iter_mut() {
         //  Move forward in direction of velocity.
@@ -923,6 +916,14 @@ fn make_random_pos() -> Vec3 {
     let y = fastrand::f32();
     Vec3::new(x * WIDTH, y * HEIGHT, 0f32)
 }
+
+fn make_random_velocity( max_speed: f32) -> Vec3 {
+    let x = fastrand::f32();
+    let y = fastrand::f32();
+    let speed = fastrand::f32() * max_speed;
+    speed * Vec3::new(x, y, 0f32)
+}
+
 
 // Show or hide instructions based on game state.
 fn game_over_system(
