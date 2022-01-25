@@ -22,7 +22,6 @@ mod math;
 // TODO: Inspector:  https://bevy-cheatbook.github.io/setup/bevy-tools.html
 // TODO: Investigate: MrGVSV/bevy_proto
 
-
 // Terminology differences from UNITY to BEVY:
 
 // BEVY     UNITY
@@ -39,8 +38,9 @@ const PROJECT: &str = "AST4!";
 const WIDTH: f32 = 800.0f32;
 const HEIGHT: f32 = 600.0f32;
 const FREE_USER_AT: u32 = 10000;
+static DELETE_CLEANUP_STAGE: &str = "delete_cleanup_stage";
 
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 struct FutureTime {
     seconds_since_startup_to_auto_destroy: f64,
 }
@@ -82,6 +82,13 @@ struct Wrapped2dComponent;
 
 #[derive(Component)]
 struct FrameRateComponent;
+
+#[derive(Component, Default)]
+struct DeleteCleanupComponent {
+    delete_after_frame: bool,
+    auto_destroy_enabled: bool,
+    auto_destroy_when: FutureTime,
+}
 
 #[derive(Component)]
 struct AsteroidComponent {
@@ -227,6 +234,11 @@ impl SceneControllerResource {
                 max_bullets: 4,
                 bullet_speed: 400.0f32,
             })
+            .insert(DeleteCleanupComponent {
+                delete_after_frame: false,
+                auto_destroy_enabled: false,
+                ..Default::default()
+            })
             .id();
 
         commands.entity(player_id).push_children(&[muzzle_id]);
@@ -325,6 +337,11 @@ impl SceneControllerResource {
                 v: make_random_velocity(300f32),
                 max_speed: 300.0f32,
                 spin: 1.0f32,
+            })
+            .insert(DeleteCleanupComponent {
+                delete_after_frame: false,
+                auto_destroy_enabled: false,
+                ..Default::default()
             });
     }
 
@@ -351,12 +368,6 @@ impl SceneControllerResource {
 #[derive(Component)]
 struct BulletComponent {
     source: BulletSource,
-}
-
-#[derive(Component)]
-struct AutoDestroyComponent {
-    when: FutureTime,
-    enabled: bool,
 }
 
 // TODO: will we really use this on the alien? Maybe max_bullets should just be on the shooter.
@@ -503,13 +514,14 @@ fn main() {
         })
         .add_startup_system(setup)
         .add_system(audio_helper::check_audio_loading)
+        .add_stage_after(CoreStage::Update, DELETE_CLEANUP_STAGE, SystemStage::single_threaded())
+            .add_system_to_stage( DELETE_CLEANUP_STAGE, delete_cleanup_system)
         .add_system_set(
             SystemSet::new()
                 .with_run_criteria(FixedTimestep::step(TIME_STEP as f64))
                 .with_system(game_over_system)
                 .with_system(player_system)
                 .with_system(wrapped_2d_system)
-                .with_system(auto_destroy_system)
                 .with_system(velocity_system)
                 .with_system(scene_system)
                 .with_system(score_system)
@@ -728,21 +740,6 @@ fn wrapped_2d_system(mut query: Query<(&Wrapped2dComponent, &mut Transform)>) {
     }
 }
 
-// TODO: Make this work in debugger by actually count time.
-fn auto_destroy_system(
-    mut commands: Commands,
-    time: Res<Time>,
-    query: Query<(Entity, &mut AutoDestroyComponent)>,
-) {
-    let now = time;
-    let mut iter = query.iter();
-    for (ee, ad) in &mut iter {
-        if ad.enabled && ad.when.is_expired(&now) {
-            commands.entity(ee).despawn_recursive();
-        }
-    }
-}
-
 fn player_system(
     mut commands: Commands,
     game_manager: Res<GameManagerResource>,
@@ -919,9 +916,10 @@ fn fire_bullet_from_player(
         })
         .insert(Visibility { is_visible: true })
         .insert(Wrapped2dComponent {})
-        .insert(AutoDestroyComponent {
-            enabled: true,
-            when: FutureTime::from_now(time, 1.2f64),
+        .insert(DeleteCleanupComponent {
+            delete_after_frame: false,
+            auto_destroy_enabled: true,
+            auto_destroy_when: FutureTime::from_now(time, 1.2f64),
         });
 }
 
@@ -1155,15 +1153,16 @@ fn collision_system(
 // TODO: Can this be part of the regular asteroid_system?
 // TODO: Split asteroid into smaller parts, or destroy it. Show explosions.
 fn asteroid_collision_system(
-    mut commands: Commands,
     mut ev_collision: EventReader<AsteroidCollisionEvent>,
+    mut query: Query<(Entity, &mut DeleteCleanupComponent)>,
 ) {
     for ev in ev_collision.iter() {
         // The entity may no longer exist, if it was deleted by some other thing already.
         /*if let Some(_) = world.unwrap().get_entity(ev.asteroid)*/
         {
-            let cc = commands.entity(ev.asteroid);
-            cc.despawn_recursive();
+            if let Ok((_, mut dcc)) = query.get_mut(ev.asteroid) {
+                dcc.delete_after_frame = true;
+            }
         }
     }
 }
@@ -1172,19 +1171,32 @@ fn asteroid_collision_system(
 //  System to delete at end frame.
 //  Game manager tracks deletions for a specific frame, so you can avoid doing it twice.
 
-
-
 // TODO: Lifes,etc.
 fn player_collision_system(
-    mut commands: Commands,
     mut ev_collision: EventReader<PlayerCollisionEvent>,
+    mut query: Query<(Entity, &mut DeleteCleanupComponent)>,
 ) {
     for ev in ev_collision.iter() {
-        // The entity may no longer exist, if it was deleted by some other thing already.
-        /*if let Some(_) = world.unwrap().get_entity(ev.player) */
-        {
-            let cc = commands.entity(ev.player);
-            cc.despawn_recursive();
+        // This is pretty inefficient.
+        if let Ok((_, mut dcc)) = query.get_mut(ev.player) {
+            dcc.delete_after_frame = true;
+        }
+    }
+}
+
+// We had trouble double deleting asteroids after getting hi
+//  by bullets or players. So now we just mark delete, and cleanup later.
+fn delete_cleanup_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    query: Query<(Entity, &DeleteCleanupComponent)>,
+) {
+    let now = time;
+    for (ent, dcc) in query.iter() {
+        if dcc.delete_after_frame {
+            commands.entity(ent).despawn_recursive();
+        } else if (dcc.auto_destroy_enabled && dcc.auto_destroy_when.is_expired(&now)) {
+            commands.entity(ent).despawn_recursive();
         }
     }
 }
