@@ -121,7 +121,7 @@ enum BulletSource {
     Alien,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Copy)]
 enum AsteroidSize {
     Large,
     Medium,
@@ -301,7 +301,7 @@ impl SceneControllerResource {
             SceneControllerResource::add_asteroid_with_size_at(
                 commands,
                 textures_resource,
-                AsteroidSize::Large,
+                &AsteroidSize::Large,
                 pos,
             )
         }
@@ -311,7 +311,7 @@ impl SceneControllerResource {
     fn add_asteroid_with_size_at(
         commands: &mut Commands,
         textures_resource: &Res<TexturesResource>,
-        size: AsteroidSize,
+        size: &AsteroidSize,
         p: Vec3,
     ) {
         let index = match size {
@@ -331,7 +331,7 @@ impl SceneControllerResource {
                 },
                 ..Default::default()
             })
-            .insert(AsteroidComponent { size })
+            .insert(AsteroidComponent { size: *size })
             .insert(Wrapped2dComponent)
             .insert(VelocityComponent {
                 v: make_random_velocity(300f32),
@@ -935,8 +935,8 @@ fn make_random_pos() -> Vec3 {
 }
 
 fn make_random_velocity(max_speed: f32) -> Vec3 {
-    let x = fastrand::f32();
-    let y = fastrand::f32();
+    let x = fastrand::f32()-0.5f32;
+    let y = fastrand::f32()-0.5f32;
     let speed = fastrand::f32() * max_speed;
     speed * Vec3::new(x, y, 0f32)
 }
@@ -1142,28 +1142,97 @@ fn collision_system(
                 player: *player_ent,
                 hit_by: ast_ent,
             });
-            ev_asteroid_collision.send(AsteroidCollisionEvent {
-                asteroid: ast_ent,
-                hit_by: *player_ent,
-            });
+            //ev_asteroid_collision.send(AsteroidCollisionEvent {
+            //    asteroid: ast_ent,
+            //    hit_by: *player_ent,
+            //});
         }
     }
+}
+
+fn replace_asteroid_with(
+    commands: &mut Commands,
+    textures_resource: &Res<TexturesResource>,
+    trans: &Transform,
+    count: u8,
+    size: AsteroidSize
+) {
+    for ii in 0..count {
+        SceneControllerResource::add_asteroid_with_size_at(commands, &textures_resource,
+            &size, trans.translation);
+        }
+
+        // TODO: Give momentum from the bullet.
+    }
+
+
+fn spawn_asteroid_or_alien_explosion(
+    transform: &Transform
+) {
+
 }
 
 // TODO: Can this be part of the regular asteroid_system?
 // TODO: Split asteroid into smaller parts, or destroy it. Show explosions.
 fn asteroid_collision_system(
+    mut commands: Commands,
     mut ev_collision: EventReader<AsteroidCollisionEvent>,
-    mut query: Query<(Entity, &mut DeleteCleanupComponent)>,
+    mut query: Query<(Entity, &AsteroidComponent, &Transform, &mut DeleteCleanupComponent)>,
+    mut game_manager: ResMut<GameManagerResource>,
+    textures_resource: Res<TexturesResource>,
+    audio: Res<Audio>,
+    audio_state: Res<audio_helper::AudioState>,
 ) {
     for ev in ev_collision.iter() {
-        // The entity may no longer exist, if it was deleted by some other thing already.
-        /*if let Some(_) = world.unwrap().get_entity(ev.asteroid)*/
         {
-            if let Ok((_, mut dcc)) = query.get_mut(ev.asteroid) {
+        // This is pretty inefficient.
+        if let Ok((_, ast, trans, mut dcc)) = query.get_mut(ev.asteroid) {
+                if dcc.delete_after_frame {
+                
+                    // I guess it's possible this asteroid already deleted
+                    //  elsewhere, so don't increase score, etc.
+                    continue;
+                }
                 dcc.delete_after_frame = true;
+
+                audio_helper::play_single_sound(
+                    &audio_helper::Tracks::Ambience,
+                    &audio_helper::Sounds::BangLarge, // TBD: Write one?
+                    &audio,
+                    &audio_state, 
+                );
+
+                match ast.size {
+                    AsteroidSize::Large => {
+                        game_manager.score += 20;
+                        replace_asteroid_with( &mut commands, &textures_resource, &trans, 2, AsteroidSize::Medium);
+                    }
+                    AsteroidSize::Medium => {
+                        game_manager.score += 50;
+                        replace_asteroid_with( &mut commands, &textures_resource, &trans, 2, AsteroidSize::Small);
+                    }
+                    AsteroidSize::Small => {
+                        game_manager.score += 100;
+                    }
+                }
+                spawn_asteroid_or_alien_explosion( trans); 
+
             }
         }
+
+        /* TODO: Awful:
+
+        
+        if (_asteroids.Count == 0)
+        {
+            StartLevel();
+        }
+        else
+        {
+            _lastAsteroidKilled = Time.time;
+        }
+        */
+
     }
 }
 
@@ -1180,10 +1249,18 @@ fn player_collision_system(
         // This is pretty inefficient.
         if let Ok((_, mut dcc)) = query.get_mut(ev.player) {
             dcc.delete_after_frame = true;
+
+            // TODO: Create an explosion for player.
+
+            // Delete lifes
+
         }
+
     }
 }
 
+// The last thing we do is look for components that need to be deleted at the end of this frame.
+//
 // We had trouble double deleting asteroids after getting hi
 //  by bullets or players. So now we just mark delete, and cleanup later.
 fn delete_cleanup_system(
@@ -1193,9 +1270,9 @@ fn delete_cleanup_system(
 ) {
     let now = time;
     for (ent, dcc) in query.iter() {
-        if dcc.delete_after_frame {
-            commands.entity(ent).despawn_recursive();
-        } else if (dcc.auto_destroy_enabled && dcc.auto_destroy_when.is_expired(&now)) {
+        if dcc.delete_after_frame || 
+        (dcc.auto_destroy_enabled && dcc.auto_destroy_when.is_expired(&now)) 
+        {
             commands.entity(ent).despawn_recursive();
         }
     }

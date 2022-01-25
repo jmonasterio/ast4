@@ -147,7 +147,7 @@ pub fn prepare_audio(commands: &mut Commands, asset_server: &AssetServer) {
     commands.insert_resource(audio_state);
 }
 
-use bevy::asset::LoadState;
+use bevy::asset::LoadState; 
 
 // TODO: Seems stupid to check this every frame.
 pub fn check_audio_loading(mut audio_state: ResMut<AudioState>, asset_server: ResMut<AssetServer>) {
