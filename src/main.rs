@@ -211,7 +211,7 @@ impl SceneControllerResource {
                 sprite: TextureAtlasSprite::new(textures_resource.player_index),
                 transform: Transform {
                     scale: Vec3::splat(1.0),
-                    translation: Vec3::new(50.0, 50.0, 0.0),
+                    translation: Vec3::new(WIDTH/2.0f32, HEIGHT/2.0f32, 0.0),
                     ..Default::default()
                 },
                 ..Default::default()
@@ -934,6 +934,7 @@ fn make_random_pos() -> Vec3 {
     Vec3::new(x * WIDTH, y * HEIGHT, 0f32)
 }
 
+// TODO: This makes some very slow speeds and need to fix that.
 fn make_random_velocity(max_speed: f32) -> Vec3 {
     let x = fastrand::f32()-0.5f32;
     let y = fastrand::f32()-0.5f32;
@@ -1120,7 +1121,14 @@ fn collision_system(
 
     for (bul_ent, _, t) in &bullet_array {
         let near_bullet_area = make_area_around(t, 25.0f32);
-        for entry in asteroid_qt.query(near_bullet_area) {
+
+
+        // TODO: Is the first returned asteroid, really the closest?
+
+
+        if let Some(entry) = asteroid_qt.query(near_bullet_area).next() {
+
+
             let idx = entry.value_ref();
             let (ast_ent, _, _) = asteroid_array[*idx];
 
