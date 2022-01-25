@@ -20,6 +20,8 @@ mod math;
 // TODO: Shooter not shooting straight.
 // TODO: Cooler asset loader: https://www.nikl.me/blog/2021/asset-handling-in-bevy-apps/#:~:text=Most%20games%20have%20some%20sort%20of%20loading%20screen,later%20states%20can%20use%20them%20through%20the%20ECS.
 // TODO: Inspector:  https://bevy-cheatbook.github.io/setup/bevy-tools.html
+// TODO: Investigate: MrGVSV/bevy_proto
+
 
 // Terminology differences from UNITY to BEVY:
 
@@ -1166,7 +1168,11 @@ fn asteroid_collision_system(
     }
 }
 
-use std::panic;
+// IDEAS: Prblem... we have double deletes.
+//  System to delete at end frame.
+//  Game manager tracks deletions for a specific frame, so you can avoid doing it twice.
+
+
 
 // TODO: Lifes,etc.
 fn player_collision_system(
