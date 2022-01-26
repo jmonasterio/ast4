@@ -528,6 +528,7 @@ fn main() {
                 .with_system(collision_system)
                 .with_system(asteroid_collision_system)
                 .with_system(player_collision_system)
+                .with_system(level_system)
                 //.with_system(paddle_movement_system)
                 //.with_system(ball_collision_system)
                 //.with_system(ball_movement_system),
@@ -1284,4 +1285,24 @@ fn delete_cleanup_system(
             commands.entity(ent).despawn_recursive();
         }
     }
+}
+
+fn level_system(
+    mut commands: Commands,
+    mut scene_controller_resource: ResMut<SceneControllerResource>,
+    game_manager: Res<GameManagerResource>,
+    time: Res<Time>,
+    textures_resource: Res<TexturesResource>,
+    query: Query<&AsteroidComponent>,
+)
+{
+    if game_manager.state == State::Over {
+        return;
+    }
+    if query.iter().count() > 0 {
+        return;
+    }
+
+    scene_controller_resource.start_level(&mut commands, &textures_resource, &time);
+
 }
