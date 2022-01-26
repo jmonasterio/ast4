@@ -158,14 +158,16 @@ impl GameManagerResource {
     fn player_killed(
         &mut self,
         commands: &mut Commands,
-        player: &PlayerComponent,
         scene_controller: &mut ResMut<SceneControllerResource>,
-        textures_resource: Res<TexturesResource>,
+        textures_resource: &Res<TexturesResource>,
         time: &Res<Time>,
     ) {
+        if self.lives > 0 {
+            self.lives -= 1;
+        }
         if self.lives < 1 {
             self.state = State::Over;
-            scene_controller.game_over(time, player);
+            scene_controller.game_over(time);
         } else {
             scene_controller.respawn_player(
                 commands,
@@ -173,17 +175,19 @@ impl GameManagerResource {
                 FutureTime::from_now(time, 0.5f64),
             );
         }
+
     }
 }
 
 impl SceneControllerResource {
-    fn game_over(&mut self, time: &Res<Time>, player: &PlayerComponent) {
+    fn game_over(&mut self, time: &Res<Time>) {
         // todo: stop all sounds.
 
         self.level = 0;
 
         //show_game_over( true);
         //show_instructions( true);
+
     }
 
     fn respawn_player(
@@ -479,7 +483,6 @@ fn main() {
         //.add_plugin(LogDiagnosticsPlugin::default())  // TODO - put behind a flag
         //.add_plugin(FrameTimeDiagnosticsPlugin::default()) // TODO - put behind a flag
         .add_plugin(AudioPlugin)
-        //  .insert_resource(Scoreboard { score: 0 })
         //.insert_resource(GameEntities {
         //    game_over_entity: None,
         //})
@@ -533,7 +536,6 @@ fn main() {
                 //.with_system(ball_collision_system)
                 //.with_system(ball_movement_system),
         )
-        //.add_system(scoreboard_system)
         //.add_system( change_title)
         .add_system(frame_rate)
         .add_system(bevy::input::system::exit_on_esc_system)
@@ -709,8 +711,8 @@ fn setup(
                 align_self: AlignSelf::Auto,
                 position_type: PositionType::Absolute,
                 position: Rect {
-                    top: Val::Percent(2.0f32),
-                    left: Val::Percent(5.0f32),
+                    top: Val::Percent(1.0f32),
+                    left: Val::Percent(8.0f32),
                     ..Default::default()
                 },
                 ..Default::default()
@@ -956,12 +958,13 @@ fn game_over_system(
 
 fn score_system(
     game_manager: Res<GameManagerResource>,
-    mut query: Query<(&mut Visibility, &ScoreComponent)>,
+    mut query: Query<(&mut Visibility, &ScoreComponent, &mut Text)>,
 ) {
     let is_playing = game_manager.state == State::Playing;
-    for (mut vis, _) in query.iter_mut() {
-        vis.is_visible = is_playing;
-    }
+    let (mut vis, _, mut text) = query.single_mut();
+    vis.is_visible = is_playing;
+
+    text.sections[0].value = game_manager.score.to_string();
 }
 
 fn frame_rate(
@@ -1251,8 +1254,13 @@ fn asteroid_collision_system(
 
 // TODO: Lifes,etc.
 fn player_collision_system(
+    mut commands: Commands,
     mut ev_collision: EventReader<PlayerCollisionEvent>,
     mut query: Query<(Entity, &mut DeleteCleanupComponent)>,
+    mut game_manager: ResMut< GameManagerResource>,
+    mut scene_controller: ResMut< SceneControllerResource>,
+    textures_resource: Res<TexturesResource>,
+    time: Res<Time>,
 ) {
     for ev in ev_collision.iter() {
         // This is pretty inefficient.
@@ -1262,7 +1270,7 @@ fn player_collision_system(
             // TODO: Create an explosion for player.
 
             // Delete lifes
-
+            game_manager.player_killed(&mut commands,&mut scene_controller,&textures_resource,&time);
         }
 
     }
