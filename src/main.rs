@@ -478,14 +478,9 @@ fn main() {
         })
         .add_plugins(DefaultPlugins)
         //.add_plugin( RngPlugin)
-
-        //.add_plugin( WindowPlugin { ..Default::default()})q
         //.add_plugin(LogDiagnosticsPlugin::default())  // TODO - put behind a flag
         //.add_plugin(FrameTimeDiagnosticsPlugin::default()) // TODO - put behind a flag
         .add_plugin(AudioPlugin)
-        //.insert_resource(GameEntities {
-        //    game_over_entity: None,
-        //})
         .add_event::<AsteroidCollisionEvent>()
         .add_event::<PlayerCollisionEvent>()
         .insert_resource( SceneControllerResource {
@@ -532,11 +527,7 @@ fn main() {
                 .with_system(asteroid_collision_system)
                 .with_system(player_collision_system)
                 .with_system(level_system)
-                //.with_system(paddle_movement_system)
-                //.with_system(ball_collision_system)
-                //.with_system(ball_movement_system),
         )
-        //.add_system( change_title)
         .add_system(frame_rate)
         .add_system(bevy::input::system::exit_on_esc_system)
         .run();
@@ -1169,8 +1160,8 @@ fn replace_asteroid_with(
     count: u8,
     size: AsteroidSize
 ) {
-    for ii in 0..count {
-        SceneControllerResource::add_asteroid_with_size_at(commands, &textures_resource,
+    for _ in 0..count {
+        SceneControllerResource::add_asteroid_with_size_at(commands, textures_resource,
             &size, trans.translation);
         }
 
