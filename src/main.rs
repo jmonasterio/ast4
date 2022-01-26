@@ -116,6 +116,11 @@ struct PlayerComponent {
 
 #[derive(Component)]
 struct ScoreComponent;
+
+#[derive(Component)]
+struct LivesComponent;
+
+
 enum BulletSource {
     Player,
     Alien,
@@ -169,6 +174,10 @@ impl GameManagerResource {
             self.state = State::Over;
             scene_controller.game_over(time);
         } else {
+
+            // TODO: Wait a few seconds before respawning player, or we may
+            //  be killed by same asteroid.
+
             scene_controller.respawn_player(
                 commands,
                 &textures_resource,
@@ -523,6 +532,7 @@ fn main() {
                 .with_system(velocity_system)
                 .with_system(scene_system)
                 .with_system(score_system)
+                .with_system(lives_system)
                 .with_system(collision_system)
                 .with_system(asteroid_collision_system)
                 .with_system(player_collision_system)
@@ -703,7 +713,7 @@ fn setup(
                 position_type: PositionType::Absolute,
                 position: Rect {
                     top: Val::Percent(1.0f32),
-                    left: Val::Percent(8.0f32),
+                    left: Val::Percent(4.0f32),
                     ..Default::default()
                 },
                 ..Default::default()
@@ -712,6 +722,39 @@ fn setup(
         })
         .insert(ScoreComponent)
         .insert(Visibility { is_visible: true });
+
+        // Lives
+    commands
+        .spawn_bundle(TextBundle {
+            text: Text {
+                sections: vec![TextSection {
+                    value: "^".to_string().repeat(3),
+                    style: TextStyle {
+                        font: asset_server.load("fonts/Hyperspace.otf"),
+                        font_size: 30.0,
+                        color: Color::rgb(1.0, 1.0, 1.0),
+                    },
+                }],
+                alignment: TextAlignment {
+                    vertical: VerticalAlign::Center,
+                    horizontal: HorizontalAlign::Left,
+                },
+            },
+            style: Style {
+                align_self: AlignSelf::Auto,
+                position_type: PositionType::Absolute,
+                position: Rect {
+                    top: Val::Percent(2.0f32),
+                    left: Val::Percent(16.0f32),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .insert(LivesComponent)
+        .insert(Visibility { is_visible: true });
+
 }
 
 fn wrapped_2d_system(mut query: Query<(&Wrapped2dComponent, &mut Transform)>) {
@@ -948,7 +991,7 @@ fn game_over_system(
 }
 
 fn score_system(
-    game_manager: Res<GameManagerResource>,
+    mut game_manager: ResMut<GameManagerResource>,
     mut query: Query<(&mut Visibility, &ScoreComponent, &mut Text)>,
 ) {
     let is_playing = game_manager.state == State::Playing;
@@ -956,6 +999,23 @@ fn score_system(
     vis.is_visible = is_playing;
 
     text.sections[0].value = game_manager.score.to_string();
+
+    if game_manager.score > game_manager.next_free_life_score {
+        game_manager.next_free_life_score += FREE_USER_AT;
+        game_manager.lives+=1;
+    }
+}
+
+fn lives_system(
+    game_manager: Res<GameManagerResource>,
+    mut query: Query<(&mut Visibility, &LivesComponent, &mut Text)>,
+    
+) {
+    let is_playing = game_manager.state == State::Playing;
+    let (mut vis, _, mut text) = query.single_mut();
+    vis.is_visible = is_playing;
+
+    text.sections[0].value = "^".to_string().repeat(game_manager.lives as usize);
 }
 
 fn frame_rate(
