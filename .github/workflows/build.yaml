@@ -18,6 +18,8 @@ jobs:
       - run: rustup target add wasm32-unknown-unknown      
       - run: cargo build --release --target wasm32-unknown-unknown
       - run: wasm-bindgen --out-dir ./target/web --target web ./target/wasm32-unknown-unknown/release/ast4.wasm
+        run: |
+          mkdir -p dist && cp -R ./target/web dist/. && cp index.html dist/.
       - uses: JamesIves/github-pages-deploy-action@4.1.5
         with:
           branch: gh-pages
