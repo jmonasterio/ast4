@@ -1,0 +1,23 @@
+on: [push]
+
+name: CI
+
+jobs:
+  build_and_test:
+    name: ast4
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - uses: jetli/wasm-bindgen-action@v0.1.0
+        with:
+          # Optional version of wasm-bindgen to install(eg. '0.2.68', 'latest')
+          version: 'latest'          
+      - run: cargo build --release --target wasm32-unknown-unknown
+      - run: wasm-bindgen --out-dir ./target/web --target web ./target/wasm32-unknown-unknown/release/ast4.wasm
+      - uses: JamesIves/github-pages-deploy-action@4.1.5
+        with:
+          branch: gh-pages
+          folder: dist
