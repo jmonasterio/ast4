@@ -474,7 +474,7 @@ pub mod built_info {
 
 fn main() {
 
-    println!("VERSION: {}  GIT_VERSION: {}", built_info::PKG_VERSION, built_info::GIT_VERSION.unwrap());
+    println!("VERSION: {}  GIT_VERSION: {}", built_info::PKG_VERSION, built_info::GIT_VERSION.unwrap_or("?????"));
 
     let mut new_app = App::new();
 
@@ -581,7 +581,7 @@ fn setup(
     audio_helper::prepare_audio(&mut commands, asset_server.as_ref());
 
     // hot reloading of assets.
-    asset_server.watch_for_changes().unwrap();
+    //asset_server.watch_for_changes().unwrap();
 
     // Add the game's entities to our world
 
@@ -663,7 +663,7 @@ fn setup(
                         },
                     },
                     TextSection {
-                        value: built_info::PKG_VERSION.to_string() + "." + built_info::GIT_VERSION.unwrap(),
+                        value: built_info::PKG_VERSION.to_string() + "." + built_info::GIT_VERSION.unwrap_or("?????"),
                         style: TextStyle {
                             font: asset_server.load("fonts/FiraMono-Medium.ttf"),
                             font_size: 10.0,
