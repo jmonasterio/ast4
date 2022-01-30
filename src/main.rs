@@ -1,6 +1,6 @@
 //#![windows_subsystem = "windows"] // Remove comment to turn off console log output
 
-use std::{ops::Mul, time::Duration};
+use std::{ops::Mul};
 
 use bevy::{
     core::FixedTimestep,
@@ -288,7 +288,7 @@ impl SceneControllerResource {
         time: &Res<Time>,
     ) {
         self.level += 1;
-        self.jaw_interval_seconds = Duration::from_secs_f32(0.9f32);
+        self.jaw_interval_seconds = 0.9f64;
         self.jaws_alternate = true;
         self.next_jaws_sound_time = Some(FutureTime::from_now(time, 1.0f64));
         self.add_asteroids(2 + self.level, commands, textures_resource); // 3.0 + Mathf.Log( (float) Level)));
@@ -445,7 +445,7 @@ struct GameStateResource {
 struct SceneControllerResource {
     level: u32,
     next_jaws_sound_time: Option<FutureTime>,
-    jaw_interval_seconds: Duration,
+    jaw_interval_seconds: f64,
     jaws_alternate: bool,
     last_asteroid_killed_at: Option<FutureTime>,
 }
@@ -461,11 +461,12 @@ struct TexturesResource {
 }
 
 fn seed_rng() {
-    let start = std::time::SystemTime::now();
-    let since_the_epoch = start
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("Time went backwards");
-    let in_ms = since_the_epoch.as_secs();
+    //let start = std::time::SystemTime::now();
+    //let since_the_epoch = start
+    //    .duration_since(std::time::UNIX_EPOCH)
+    //    .expect("Time went backwards");
+    //let in_ms = since_the_epoch.as_secs();
+    let in_ms = 0u64;
     fastrand::seed(in_ms as u64);
 }
 fn main() {
@@ -501,7 +502,7 @@ fn main() {
 
         })
         .insert_resource(SceneControllerResource {
-            jaw_interval_seconds: Duration::from_secs_f32(0.9f32),
+            jaw_interval_seconds: 0.9f64,
             jaws_alternate: false,
             next_jaws_sound_time: None,
             ..Default::default()
@@ -1076,14 +1077,12 @@ fn scene_system(
             .is_expired(time)
         // if in level
         {
-            if scene_controller.jaw_interval_seconds.as_secs_f32() > 0.1800f32 {
-                scene_controller.jaw_interval_seconds = Duration::from_secs_f32(
-                    scene_controller.jaw_interval_seconds.as_secs_f32() - 0.005f32,
-                );
+            if scene_controller.jaw_interval_seconds > 0.1800f64 {
+                scene_controller.jaw_interval_seconds -= 0.005f64
             }
             scene_controller.next_jaws_sound_time = Some(FutureTime::from_now(
                 time,
-                scene_controller.jaw_interval_seconds.as_secs_f64(),
+                scene_controller.jaw_interval_seconds,
             ));
             if scene_controller.jaws_alternate {
                 audio_helper::play_single_sound(

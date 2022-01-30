@@ -6,6 +6,10 @@ Still working on it, but actually playable.
 
 NOTES to SELF:
 
+# TO BUILD FOR WASM/WEBG: https://dev.to/sbelzile/making-games-in-rust-deploying-a-bevy-app-to-the-web-1ahn
+cargo build --release --target wasm32-unknown-unknown
+wasm-bindgen --out-dir ./target/web --target web ./target/wasm32-unknown-unknown/release/ast4.wasm
+npx serve
 
 Link to OLD unity version with playable link: https://github.com/jmonasterio/ast3
 
