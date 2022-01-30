@@ -1,13 +1,13 @@
 //#![windows_subsystem = "windows"] // Remove comment to turn off console log output
 
-use std::{ops::Mul};
+use std::ops::Mul;
 
 use bevy::{
     core::FixedTimestep,
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin}, //sprite::collide_aabb::{collide, Collision},
-    prelude::*,
     ecs::system::SystemParam,
     //    math::Vec3,
+    prelude::*,
 };
 use bevy_render::camera::{DepthCalculation, ScalingMode, WindowOrigin};
 //use bevy_rng::*;
@@ -94,6 +94,7 @@ struct DeleteCleanupComponent {
 #[derive(Component)]
 struct AsteroidComponent {
     size: AsteroidSize,
+    hit_radius: f32,
 }
 
 #[derive(Component)]
@@ -120,7 +121,6 @@ struct ScoreComponent;
 
 #[derive(Component)]
 struct LivesComponent;
-
 
 enum BulletSource {
     Player,
@@ -175,7 +175,6 @@ impl GameManagerResource {
             self.state = State::Over;
             scene_controller.game_over(time);
         } else {
-
             // TODO: Wait a few seconds before respawning player, or we may
             //  be killed by same asteroid.
 
@@ -185,7 +184,6 @@ impl GameManagerResource {
                 FutureTime::from_now(time, 0.5f64),
             );
         }
-
     }
 }
 
@@ -197,9 +195,11 @@ impl SceneControllerResource {
 
         //show_game_over( true);
         //show_instructions( true);
-
     }
 
+    // TODO: We need to respawn player later, so there:
+    //  1) aren't two players in one frame.
+    //  2) Multiple hits with same asteroid after respawn
     fn respawn_player(
         &mut self,
         commands: &mut Commands,
@@ -225,7 +225,7 @@ impl SceneControllerResource {
                 sprite: TextureAtlasSprite::new(textures_resource.player_index),
                 transform: Transform {
                     scale: Vec3::splat(1.0),
-                    translation: Vec3::new(WIDTH/2.0f32, HEIGHT/2.0f32, 0.0),
+                    translation: Vec3::new(WIDTH / 2.0f32, HEIGHT / 2.0f32, 0.0),
                     ..Default::default()
                 },
                 ..Default::default()
@@ -310,7 +310,7 @@ impl SceneControllerResource {
         commands: &mut Commands,
         textures_resource: &Res<TexturesResource>,
     ) {
-        for ii in 0..count - 1 {
+        for _ in 0..count - 1 {
             let pos = SceneControllerResource::make_safe_asteroid_pos();
             SceneControllerResource::add_asteroid_with_size_at(
                 commands,
@@ -328,6 +328,12 @@ impl SceneControllerResource {
         size: &AsteroidSize,
         p: Vec3,
     ) {
+        // TODO: Maybe all this should be in a map.
+        let hit_radius = match size {
+            AsteroidSize::Large => textures_resource.asteroid_large_hit_radius,
+            AsteroidSize::Medium => textures_resource.asteroid_medium_hit_radius,
+            AsteroidSize::Small => textures_resource.asteroid_small_hit_radius,
+        };
         let index = match size {
             AsteroidSize::Large => textures_resource.asteroid_large_index,
             AsteroidSize::Medium => textures_resource.asteroid_medium_index,
@@ -345,7 +351,10 @@ impl SceneControllerResource {
                 },
                 ..Default::default()
             })
-            .insert(AsteroidComponent { size: *size })
+            .insert(AsteroidComponent {
+                size: *size,
+                hit_radius,
+            })
             .insert(Wrapped2dComponent)
             .insert(VelocityComponent {
                 v: make_random_velocity(300f32),
@@ -425,7 +434,7 @@ fn rotate_by_angle(t: &mut Transform, angle_to_rotate: f32) -> f32 {
     let rotation_delta = Quat::from_rotation_z(angle_to_rotate);
     // update the ship rotation with our rotation delta
     t.rotation *= rotation_delta;
-    return target_angle;
+    target_angle
 }
 
 struct FrameRateResource {
@@ -459,9 +468,13 @@ struct TexturesResource {
     asteroid_large_index: usize,
     asteroid_medium_index: usize,
     asteroid_small_index: usize,
+
+    asteroid_large_hit_radius: f32,
+    asteroid_medium_hit_radius: f32,
+    asteroid_small_hit_radius: f32,
 }
 
-fn seed_rng( t: &Res<Time>) {
+fn seed_rng(t: &Res<Time>) {
     let in_ms = t.seconds_since_startup();
     println!("seed: {}", in_ms);
     fastrand::seed(in_ms as u64);
@@ -473,14 +486,17 @@ pub mod built_info {
 }
 
 fn main() {
-
-    println!("VERSION: {}  GIT_VERSION: {}", built_info::PKG_VERSION, built_info::GIT_VERSION.unwrap_or("?????"));
+    println!(
+        "VERSION: {}  GIT_VERSION: {}",
+        built_info::PKG_VERSION,
+        built_info::GIT_VERSION.unwrap_or("?????")
+    );
 
     let mut new_app = App::new();
 
-    new_app.
-    insert_resource(ClearColor(Color::rgb(0.0, 0.0, 0.0)))
-    .insert_resource(WindowDescriptor {
+    new_app
+        .insert_resource(ClearColor(Color::rgb(0.0, 0.0, 0.0)))
+        .insert_resource(WindowDescriptor {
             title: PROJECT.to_string(),
             width: WIDTH,
             height: HEIGHT,
@@ -497,13 +513,12 @@ fn main() {
         .add_plugin(AudioPlugin)
         .add_event::<AsteroidCollisionEvent>()
         .add_event::<PlayerCollisionEvent>()
-        .insert_resource( SceneControllerResource {
+        .insert_resource(SceneControllerResource {
             ..Default::default()
         })
-        .insert_resource( GameManagerResource {
+        .insert_resource(GameManagerResource {
             state: State::Over,
             ..Default::default()
-
         })
         .insert_resource(SceneControllerResource {
             jaw_interval_seconds: 0.9f64,
@@ -519,15 +534,19 @@ fn main() {
         })
         .insert_resource(GameStateResource {
             level: 0,
-            next_free_life_score: 10000
+            next_free_life_score: 10000,
         })
-        .insert_resource( TexturesResource {
+        .insert_resource(TexturesResource {
             ..Default::default()
         })
         .add_startup_system(setup)
         .add_system(audio_helper::check_audio_loading)
-        .add_stage_after(CoreStage::Update, DELETE_CLEANUP_STAGE, SystemStage::single_threaded())
-            .add_system_to_stage( DELETE_CLEANUP_STAGE, delete_cleanup_system)
+        .add_stage_after(
+            CoreStage::Update,
+            DELETE_CLEANUP_STAGE,
+            SystemStage::single_threaded(),
+        )
+        .add_system_to_stage(DELETE_CLEANUP_STAGE, delete_cleanup_system)
         .add_system_set(
             SystemSet::new()
                 .with_run_criteria(FixedTimestep::step(TIME_STEP as f64))
@@ -541,7 +560,7 @@ fn main() {
                 .with_system(collision_system)
                 .with_system(asteroid_collision_system)
                 .with_system(player_collision_system)
-                .with_system(level_system)
+                .with_system(level_system),
         )
         .add_system(frame_rate)
         .add_system(bevy::input::system::exit_on_esc_system)
@@ -576,7 +595,7 @@ fn setup(
     //scene_controller_resource: ResMut<SceneControllerResource>,
     //game_manager: ResMut<GameManagerResource>,
 ) {
-    seed_rng( &time);
+    seed_rng(&time);
 
     audio_helper::prepare_audio(&mut commands, asset_server.as_ref());
 
@@ -606,27 +625,29 @@ fn setup(
         },
     );
 
-    textures_resource.asteroid_large_index = TextureAtlas::add_texture(
-        &mut texture_atlas,
-        bevy::sprite::Rect {
-            min: Vec2::new(82.0, 4.0),
-            max: Vec2::new(126.0, 42.0),
-        },
-    );
-    textures_resource.asteroid_medium_index = TextureAtlas::add_texture(
-        &mut texture_atlas,
-        bevy::sprite::Rect {
-            min: Vec2::new(47.0, 4.0),
-            max: Vec2::new(71.0, 24.0),
-        },
-    );
-    textures_resource.asteroid_small_index = TextureAtlas::add_texture(
-        &mut texture_atlas,
-        bevy::sprite::Rect {
-            min: Vec2::new(29.0, 2.0),
-            max: Vec2::new(43.0, 15.0),
-        },
-    );
+    let large_asteroid_rect = bevy::sprite::Rect {
+        min: Vec2::new(82.0, 4.0),
+        max: Vec2::new(126.0, 42.0),
+    };
+    textures_resource.asteroid_large_index =
+        TextureAtlas::add_texture(&mut texture_atlas, large_asteroid_rect);
+    textures_resource.asteroid_large_hit_radius = large_asteroid_rect.width() / 2.0f32;
+
+    let medium_asteroid_rect = bevy::sprite::Rect {
+        min: Vec2::new(47.0, 4.0),
+        max: Vec2::new(71.0, 24.0),
+    };
+    textures_resource.asteroid_medium_index =
+        TextureAtlas::add_texture(&mut texture_atlas, medium_asteroid_rect);
+    textures_resource.asteroid_medium_hit_radius = medium_asteroid_rect.width() / 2.0f32;
+
+    let small_asteroid_rect = bevy::sprite::Rect {
+        min: Vec2::new(29.0, 2.0),
+        max: Vec2::new(43.0, 15.0),
+    };
+    textures_resource.asteroid_small_index =
+        TextureAtlas::add_texture(&mut texture_atlas, small_asteroid_rect);
+    textures_resource.asteroid_small_hit_radius = small_asteroid_rect.width() / 2.0f32;
 
     //let texture_atlas = TextureAtlas::from_grid(texture_handle, Vec2::new(25.0,25.0),1,1);
 
@@ -663,7 +684,9 @@ fn setup(
                         },
                     },
                     TextSection {
-                        value: built_info::PKG_VERSION.to_string() + "." + built_info::GIT_VERSION.unwrap_or("?????"),
+                        value: built_info::PKG_VERSION.to_string()
+                            + "."
+                            + built_info::GIT_VERSION.unwrap_or("?????"),
                         style: TextStyle {
                             font: asset_server.load("fonts/FiraMono-Medium.ttf"),
                             font_size: 10.0,
@@ -747,7 +770,7 @@ fn setup(
         .insert(ScoreComponent)
         .insert(Visibility { is_visible: true });
 
-        // Lives
+    // Lives
     commands
         .spawn_bundle(TextBundle {
             text: Text {
@@ -778,7 +801,6 @@ fn setup(
         })
         .insert(LivesComponent)
         .insert(Visibility { is_visible: true });
-
 }
 
 fn wrapped_2d_system(mut query: Query<(&Wrapped2dComponent, &mut Transform)>) {
@@ -997,8 +1019,8 @@ fn make_random_pos() -> Vec3 {
 
 // TODO: This makes some very slow speeds and need to fix that.
 fn make_random_velocity(max_speed: f32) -> Vec3 {
-    let x = fastrand::f32()-0.5f32;
-    let y = fastrand::f32()-0.5f32;
+    let x = fastrand::f32() - 0.5f32;
+    let y = fastrand::f32() - 0.5f32;
     let speed = fastrand::f32() * max_speed;
     speed * Vec3::new(x, y, 0f32)
 }
@@ -1026,14 +1048,13 @@ fn score_system(
 
     if game_manager.score > game_manager.next_free_life_score {
         game_manager.next_free_life_score += FREE_USER_AT;
-        game_manager.lives+=1;
+        game_manager.lives += 1;
     }
 }
 
 fn lives_system(
     game_manager: Res<GameManagerResource>,
     mut query: Query<(&mut Visibility, &LivesComponent, &mut Text)>,
-    
 ) {
     let is_playing = game_manager.state == State::Playing;
     let (mut vis, _, mut text) = query.single_mut();
@@ -1063,13 +1084,13 @@ fn frame_rate(
 // Reduce number of parmams :https://github.com/bevyengine/bevy/issues/3267
 #[derive(SystemParam)]
 struct MySystemParam<'w, 's> {
-    audio: Res<'w,Audio>,
+    audio: Res<'w, Audio>,
     audio_state: ResMut<'w, audio_helper::AudioState>,
     textures_resource: Res<'w, TexturesResource>,
-    _query: Query<'w,'s, ()>
+    _query: Query<'w, 's, ()>,
 }
 
-fn scene_system( 
+fn scene_system(
     commands: Commands,
     mut scene_controller: ResMut<SceneControllerResource>,
     mut game_manager: ResMut<GameManagerResource>,
@@ -1083,14 +1104,23 @@ fn scene_system(
         }
         State::Over => {
             // TODO: Turn off jaws sounds.
-            audio_helper::stop_looped_sound(&audio_helper::Tracks::Ambience, &common.audio, &common.audio_state);
+            audio_helper::stop_looped_sound(
+                &audio_helper::Tracks::Ambience,
+                &common.audio,
+                &common.audio_state,
+            );
 
             if keyboard_input.pressed(KeyCode::Space) {
                 seed_rng(&time); // reseed again.
                 game_manager.lives = 4;
                 game_manager.score = 0;
                 game_manager.state = State::Playing;
-                scene_controller.start_game(commands, common.textures_resource, game_manager, &time);
+                scene_controller.start_game(
+                    commands,
+                    common.textures_resource,
+                    game_manager,
+                    &time,
+                );
             }
         }
     }
@@ -1170,7 +1200,7 @@ fn collision_system(
     assert!(player_array.len() <= 1);
     let asteroid_array: Vec<(Entity, &AsteroidComponent, &Transform)> =
         asteroid_query.iter().collect();
-    let alien_array: Vec<(Entity, &AlienComponent, &Transform)> = alient_query.iter().collect();
+    let _alien_array: Vec<(Entity, &AlienComponent, &Transform)> = alient_query.iter().collect();
 
     fn make_area_around(t: &Transform, radius: f32) -> quadtree_rs::area::Area<i16> {
         let r = radius as i16;
@@ -1204,41 +1234,43 @@ fn collision_system(
         );
     }
 
-    for (bul_ent, _, t) in &bullet_array {
-        let near_bullet_area = make_area_around(t, 25.0f32);
-
+    for (bul_ent, _, bul_trans) in &bullet_array {
+        let near_bullet_area = make_area_around(bul_trans, 25.0f32);
 
         // TODO: Is the first returned asteroid, really the closest?
 
-
         if let Some(entry) = asteroid_qt.query(near_bullet_area).next() {
-
-
             let idx = entry.value_ref();
-            let (ast_ent, _, _) = asteroid_array[*idx];
+            let (ast_ent, ast_comp, ast_trans) = asteroid_array[*idx];
 
-            commands.entity(*bul_ent).despawn_recursive();
-            ev_asteroid_collision.send(AsteroidCollisionEvent {
-                asteroid: ast_ent,
-                hit_by: *bul_ent,
-            });
+            // So we're close. Let's calculate actual distance based on size.
+            let d = bul_trans.translation.distance(ast_trans.translation);
+            if d < ast_comp.hit_radius {
+                commands.entity(*bul_ent).despawn_recursive();
+                ev_asteroid_collision.send(AsteroidCollisionEvent {
+                    asteroid: ast_ent,
+                    hit_by: *bul_ent,
+                });
+            }
         }
     }
 
-    for (player_ent, _, t) in &player_array {
-        let near_bullet_area = make_area_around(t, 25.0f32);
+    for (player_ent, _, play_trans) in &player_array {
+        let near_bullet_area = make_area_around(play_trans, 25.0f32); // TOD: hardcode
         for entry in asteroid_qt.query(near_bullet_area) {
             let idx = entry.value_ref();
-            let (ast_ent, _, _) = asteroid_array[*idx];
+            let (ast_ent, ast_comp, ast_trans) = asteroid_array[*idx];
 
-            ev_player_collision.send(PlayerCollisionEvent {
-                player: *player_ent,
-                hit_by: ast_ent,
-            });
-            //ev_asteroid_collision.send(AsteroidCollisionEvent {
-            //    asteroid: ast_ent,
-            //    hit_by: *player_ent,
-            //});
+            let d = play_trans.translation.distance(ast_trans.translation);
+
+            // TODO: We really want to see whether the triangle of the ship is inside
+            //  the radius of the asteroid. Ignore shape, of asteroid.
+            if d < ast_comp.hit_radius {
+                ev_player_collision.send(PlayerCollisionEvent {
+                    player: *player_ent,
+                    hit_by: ast_ent,
+                });
+            }
         }
     }
 }
@@ -1248,29 +1280,33 @@ fn replace_asteroid_with(
     textures_resource: &Res<TexturesResource>,
     trans: &Transform,
     count: u8,
-    size: AsteroidSize
+    size: AsteroidSize,
 ) {
     for _ in 0..count {
-        SceneControllerResource::add_asteroid_with_size_at(commands, textures_resource,
-            &size, trans.translation);
-        }
-
-        // TODO: Give momentum from the bullet.
+        SceneControllerResource::add_asteroid_with_size_at(
+            commands,
+            textures_resource,
+            &size,
+            trans.translation,
+        );
     }
 
-
-fn spawn_asteroid_or_alien_explosion(
-    transform: &Transform
-) {
-
+    // TODO: Give momentum from the bullet.
 }
+
+fn spawn_asteroid_or_alien_explosion(_: &Transform) {}
 
 // TODO: Can this be part of the regular asteroid_system?
 // TODO: Split asteroid into smaller parts, or destroy it. Show explosions.
 fn asteroid_collision_system(
     mut commands: Commands,
     mut ev_collision: EventReader<AsteroidCollisionEvent>,
-    mut query: Query<(Entity, &AsteroidComponent, &Transform, &mut DeleteCleanupComponent)>,
+    mut query: Query<(
+        Entity,
+        &AsteroidComponent,
+        &Transform,
+        &mut DeleteCleanupComponent,
+    )>,
     mut game_manager: ResMut<GameManagerResource>,
     textures_resource: Res<TexturesResource>,
     audio: Res<Audio>,
@@ -1278,10 +1314,9 @@ fn asteroid_collision_system(
 ) {
     for ev in ev_collision.iter() {
         {
-        // This is pretty inefficient.
-        if let Ok((_, ast, trans, mut dcc)) = query.get_mut(ev.asteroid) {
+            // This is pretty inefficient.
+            if let Ok((_, ast, trans, mut dcc)) = query.get_mut(ev.asteroid) {
                 if dcc.delete_after_frame {
-                
                     // I guess it's possible this asteroid already deleted
                     //  elsewhere, so don't increase score, etc.
                     continue;
@@ -1292,30 +1327,41 @@ fn asteroid_collision_system(
                     &audio_helper::Tracks::Ambience,
                     &audio_helper::Sounds::BangLarge, // TBD: Write one?
                     &audio,
-                    &audio_state, 
+                    &audio_state,
                 );
 
                 match ast.size {
                     AsteroidSize::Large => {
                         game_manager.score += 20;
-                        replace_asteroid_with( &mut commands, &textures_resource, &trans, 2, AsteroidSize::Medium);
+                        replace_asteroid_with(
+                            &mut commands,
+                            &textures_resource,
+                            &trans,
+                            2,
+                            AsteroidSize::Medium,
+                        );
                     }
                     AsteroidSize::Medium => {
                         game_manager.score += 50;
-                        replace_asteroid_with( &mut commands, &textures_resource, &trans, 2, AsteroidSize::Small);
+                        replace_asteroid_with(
+                            &mut commands,
+                            &textures_resource,
+                            trans,
+                            2,
+                            AsteroidSize::Small,
+                        );
                     }
                     AsteroidSize::Small => {
                         game_manager.score += 100;
                     }
                 }
-                spawn_asteroid_or_alien_explosion( trans); 
-
+                spawn_asteroid_or_alien_explosion(trans);
             }
         }
 
         /* TODO: Awful:
 
-        
+
         if (_asteroids.Count == 0)
         {
             StartLevel();
@@ -1325,7 +1371,6 @@ fn asteroid_collision_system(
             _lastAsteroidKilled = Time.time;
         }
         */
-
     }
 }
 
@@ -1338,8 +1383,8 @@ fn player_collision_system(
     mut commands: Commands,
     mut ev_collision: EventReader<PlayerCollisionEvent>,
     mut query: Query<(Entity, &mut DeleteCleanupComponent)>,
-    mut game_manager: ResMut< GameManagerResource>,
-    mut scene_controller: ResMut< SceneControllerResource>,
+    mut game_manager: ResMut<GameManagerResource>,
+    mut scene_controller: ResMut<SceneControllerResource>,
     textures_resource: Res<TexturesResource>,
     time: Res<Time>,
 ) {
@@ -1351,9 +1396,13 @@ fn player_collision_system(
             // TODO: Create an explosion for player.
 
             // Delete lifes
-            game_manager.player_killed(&mut commands,&mut scene_controller,&textures_resource,&time);
+            game_manager.player_killed(
+                &mut commands,
+                &mut scene_controller,
+                &textures_resource,
+                &time,
+            );
         }
-
     }
 }
 
@@ -1368,8 +1417,8 @@ fn delete_cleanup_system(
 ) {
     let now = time;
     for (ent, dcc) in query.iter() {
-        if dcc.delete_after_frame || 
-        (dcc.auto_destroy_enabled && dcc.auto_destroy_when.is_expired(&now)) 
+        if dcc.delete_after_frame
+            || (dcc.auto_destroy_enabled && dcc.auto_destroy_when.is_expired(&now))
         {
             commands.entity(ent).despawn_recursive();
         }
@@ -1383,8 +1432,7 @@ fn level_system(
     time: Res<Time>,
     textures_resource: Res<TexturesResource>,
     query: Query<&AsteroidComponent>,
-)
-{
+) {
     if game_manager.state == State::Over {
         return;
     }
@@ -1393,5 +1441,4 @@ fn level_system(
     }
 
     scene_controller_resource.start_level(&mut commands, &textures_resource, &time);
-
 }

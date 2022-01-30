@@ -60,12 +60,9 @@ pub fn start_looped_sound(
 
     // TODO: This seems so sketch. Do I have to clone handle, even if not going to use?
     let handle = audio_state.sound_handles.get(sound).unwrap().clone();
-    let cas = audio_state.audio_tracks.get_mut(track).unwrap(); 
+    let cas = audio_state.audio_tracks.get_mut(track).unwrap();
     if !cas.loop_started {
-        audio.play_looped_in_channel(
-            handle,
-            &cas.channel,
-            );
+        audio.play_looped_in_channel(handle, &cas.channel);
         cas.loop_started = true;
     }
 }
@@ -87,7 +84,7 @@ pub fn play_single_sound(
     let cas = audio_state.audio_tracks.get(track).unwrap(); // Get first channel.
     audio.play_in_channel(
         audio_state.sound_handles.get(sound).unwrap().clone(),
-        &cas.channel, 
+        &cas.channel,
     );
 }
 
@@ -99,22 +96,35 @@ pub fn prepare_audio(commands: &mut Commands, asset_server: &AssetServer) {
         audio_tracks: HashMap::new(),
     };
 
-    audio_state
-        .audio_tracks
-        .insert(Tracks::Game, ChannelAudioState { channel:AudioChannel::new(Tracks::Game.to_string()), loop_started: false});
+    audio_state.audio_tracks.insert(
+        Tracks::Game,
+        ChannelAudioState {
+            channel: AudioChannel::new(Tracks::Game.to_string()),
+            loop_started: false,
+        },
+    );
 
     audio_state.audio_tracks.insert(
         Tracks::Ambience,
-        ChannelAudioState{ channel: AudioChannel::new(Tracks::Ambience.to_string()), loop_started: false },
+        ChannelAudioState {
+            channel: AudioChannel::new(Tracks::Ambience.to_string()),
+            loop_started: false,
+        },
     );
 
     audio_state.audio_tracks.insert(
         Tracks::Saucers,
-        ChannelAudioState{ channel: AudioChannel::new(Tracks::Saucers.to_string()), loop_started: false },
+        ChannelAudioState {
+            channel: AudioChannel::new(Tracks::Saucers.to_string()),
+            loop_started: false,
+        },
     );
     audio_state.audio_tracks.insert(
         Tracks::Thrust,
-        ChannelAudioState{ channel: AudioChannel::new(Tracks::Thrust.to_string()), loop_started: false },
+        ChannelAudioState {
+            channel: AudioChannel::new(Tracks::Thrust.to_string()),
+            loop_started: false,
+        },
     );
 
     audio_state
@@ -153,7 +163,7 @@ pub fn prepare_audio(commands: &mut Commands, asset_server: &AssetServer) {
     commands.insert_resource(audio_state);
 }
 
-use bevy::asset::LoadState; 
+use bevy::asset::LoadState;
 
 // TODO: Seems stupid to check this every frame.
 pub fn check_audio_loading(mut audio_state: ResMut<AudioState>, asset_server: ResMut<AssetServer>) {
