@@ -18,8 +18,6 @@ use bevy_kira_audio::{Audio, AudioPlugin};
 mod audio_helper;
 mod math;
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
-
 // TODO: Shooter not shooting straight.
 // TODO: Cooler asset loader: https://www.nikl.me/blog/2021/asset-handling-in-bevy-apps/#:~:text=Most%20games%20have%20some%20sort%20of%20loading%20screen,later%20states%20can%20use%20them%20through%20the%20ECS.
 // TODO: Inspector:  https://bevy-cheatbook.github.io/setup/bevy-tools.html
@@ -476,7 +474,7 @@ pub mod built_info {
 
 fn main() {
 
-    println!("VERSION: {}", built_info::PKG_VERSION); //TOO BAD: , built_info::GIT_HEAD_REF);
+    println!("VERSION: {}  GIT_VERSION: {}", built_info::PKG_VERSION, built_info::GIT_VERSION.unwrap());
 
     let mut new_app = App::new();
 
@@ -656,6 +654,22 @@ fn setup(
                             color: Color::rgb(1.0, 0.5, 0.5),
                         },
                     },
+                    TextSection {
+                        value: " VERSION: ".to_string(),
+                        style: TextStyle {
+                            font: asset_server.load("fonts/FiraSans-Bold.ttf"),
+                            font_size: 10.0,
+                            color: Color::rgb(0.5, 0.5, 1.0),
+                        },
+                    },
+                    TextSection {
+                        value: built_info::PKG_VERSION.to_string() + "." + built_info::GIT_VERSION.unwrap(),
+                        style: TextStyle {
+                            font: asset_server.load("fonts/FiraMono-Medium.ttf"),
+                            font_size: 10.0,
+                            color: Color::rgb(1.0, 0.5, 0.5),
+                        },
+                    },
                 ],
                 ..Default::default()
             },
@@ -663,7 +677,7 @@ fn setup(
                 position_type: PositionType::Absolute,
                 position: Rect {
                     top: Val::Px(5.0),
-                    left: Val::Px(5.0),
+                    left: Val::Px(650.0),
                     ..Default::default()
                 },
                 ..Default::default()
