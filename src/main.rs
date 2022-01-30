@@ -178,11 +178,7 @@ impl GameManagerResource {
             // TODO: Wait a few seconds before respawning player, or we may
             //  be killed by same asteroid.
 
-            scene_controller.respawn_player(
-                commands,
-                &textures_resource,
-                FutureTime::from_now(time, 0.5f64),
-            );
+            scene_controller.respawn_player_later(FutureTime::from_now(time, 0.5f64));
         }
     }
 }
@@ -197,6 +193,10 @@ impl SceneControllerResource {
         //show_instructions( true);
     }
 
+    fn respawn_player_later(&mut self, ft: FutureTime) {
+        self.player_spawn_when = Some(ft);
+    }
+
     // TODO: We need to respawn player later, so there:
     //  1) aren't two players in one frame.
     //  2) Multiple hits with same asteroid after respawn
@@ -204,7 +204,6 @@ impl SceneControllerResource {
         &mut self,
         commands: &mut Commands,
         textures_resource: &Res<TexturesResource>,
-        ft: FutureTime,
     ) {
         // This is where we shoot from on player.
         let muzzle_id = commands
@@ -275,11 +274,7 @@ impl SceneControllerResource {
         self.clear_asteroids();
         self.clear_aliens();
         self.start_level(&mut commands, &textures_resource, time);
-        self.respawn_player(
-            &mut commands,
-            &textures_resource,
-            FutureTime::from_now(time, 0.5f64),
-        );
+        self.respawn_player_later(FutureTime::from_now(time, 0.5f64));
     }
 
     fn start_level(
@@ -458,6 +453,8 @@ struct SceneControllerResource {
     jaw_interval_seconds: f64,
     jaws_alternate: bool,
     last_asteroid_killed_at: Option<FutureTime>,
+
+    player_spawn_when: Option<FutureTime>,
 }
 
 #[derive(Default, Clone)]
@@ -560,7 +557,8 @@ fn main() {
                 .with_system(collision_system)
                 .with_system(asteroid_collision_system)
                 .with_system(player_collision_system)
-                .with_system(level_system),
+                .with_system(level_system)
+                .with_system(player_spawn_system),
         )
         .add_system(frame_rate)
         .add_system(bevy::input::system::exit_on_esc_system)
@@ -1441,4 +1439,18 @@ fn level_system(
     }
 
     scene_controller_resource.start_level(&mut commands, &textures_resource, &time);
+}
+
+fn player_spawn_system(
+    mut commands: Commands,
+    textures_resource: Res<TexturesResource>,
+    mut scene_controller_resource: ResMut<SceneControllerResource>,
+    time: Res<Time>,
+) {
+    if let Some(when) = scene_controller_resource.player_spawn_when {
+        if when.is_expired(&time) {
+            scene_controller_resource.player_spawn_when = None;
+            scene_controller_resource.respawn_player(&mut commands, &textures_resource);
+        }
+    }
 }
