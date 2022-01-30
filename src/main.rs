@@ -18,6 +18,8 @@ use bevy_kira_audio::{Audio, AudioPlugin};
 mod audio_helper;
 mod math;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 // TODO: Shooter not shooting straight.
 // TODO: Cooler asset loader: https://www.nikl.me/blog/2021/asset-handling-in-bevy-apps/#:~:text=Most%20games%20have%20some%20sort%20of%20loading%20screen,later%20states%20can%20use%20them%20through%20the%20ECS.
 // TODO: Inspector:  https://bevy-cheatbook.github.io/setup/bevy-tools.html
@@ -467,7 +469,14 @@ fn seed_rng( t: &Res<Time>) {
     fastrand::seed(in_ms as u64);
 }
 
+pub mod built_info {
+    // The file has been placed there by the build script.
+    include!(concat!(env!("OUT_DIR"), "/built.rs"));
+}
+
 fn main() {
+
+    println!("VERSION: {}", built_info::PKG_VERSION); //TOO BAD: , built_info::GIT_HEAD_REF);
 
     let mut new_app = App::new();
 
