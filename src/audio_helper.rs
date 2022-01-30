@@ -40,53 +40,54 @@ pub struct AudioState {
     sound_handles: HashMap<Sounds, Handle<AudioSource>>,
 
     // Tracks/channel. For now, we don't need to keep data about each channel (ChannelAudioState)
-    audio_tracks: HashMap<Tracks, (AudioChannel, ChannelAudioState)>,
+    audio_tracks: HashMap<Tracks, ChannelAudioState>,
 }
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Clone)]
 struct ChannelAudioState {
-    //stopped: bool,
-//paused: bool,
+    channel: AudioChannel,
     loop_started: bool,
-//volume: f32,
 }
 
 pub fn start_looped_sound(
     track: &Tracks,
     sound: &Sounds,
     audio: &Res<Audio>,
-    audio_state: &Res<AudioState>,
+    audio_state: &mut ResMut<AudioState>,
 ) {
     if !audio_state.audio_loaded {
         return;
     }
-    let (channel_id, mut channel_state) = audio_state.audio_tracks.get(track).unwrap(); 
-    if !channel_state.loop_started {
+
+    // TODO: This seems so sketch. Do I have to clone handle, even if not going to use?
+    let handle = audio_state.sound_handles.get(sound).unwrap().clone();
+    let cas = audio_state.audio_tracks.get_mut(track).unwrap(); 
+    if !cas.loop_started {
         audio.play_looped_in_channel(
-        audio_state.sound_handles.get(sound).unwrap().clone(),
-        channel_id,
-        );
-        channel_state.loop_started = true;
+            handle,
+            &cas.channel,
+            );
+        cas.loop_started = true;
     }
 }
 
-pub fn stop_looped_sound(track: &Tracks, audio: &Res<Audio>, audio_state: &Res<AudioState>) {
-    let (channel_id, _) = audio_state.audio_tracks.get(track).unwrap(); // Get first channel.
-    audio.stop_channel(channel_id);
+pub fn stop_looped_sound(track: &Tracks, audio: &Res<Audio>, audio_state: &ResMut<AudioState>) {
+    let cas = audio_state.audio_tracks.get(track).unwrap(); // Get first channel.
+    audio.stop_channel(&cas.channel);
 }
 
 pub fn play_single_sound(
     track: &Tracks,
     sound: &Sounds,
     audio: &Res<Audio>,
-    audio_state: &Res<AudioState>,
+    audio_state: &ResMut<AudioState>,
 ) {
     if !audio_state.audio_loaded {
         return;
     }
-    let (channel_id, _) = audio_state.audio_tracks.get(track).unwrap(); // Get first channel.
+    let cas = audio_state.audio_tracks.get(track).unwrap(); // Get first channel.
     audio.play_in_channel(
         audio_state.sound_handles.get(sound).unwrap().clone(),
-        channel_id, 
+        &cas.channel, 
     );
 }
 
@@ -100,20 +101,20 @@ pub fn prepare_audio(commands: &mut Commands, asset_server: &AssetServer) {
 
     audio_state
         .audio_tracks
-        .insert(Tracks::Game, (AudioChannel::new(Tracks::Game.to_string()), ChannelAudioState { loop_started: false}));
+        .insert(Tracks::Game, ChannelAudioState { channel:AudioChannel::new(Tracks::Game.to_string()), loop_started: false});
 
     audio_state.audio_tracks.insert(
         Tracks::Ambience,
-        (AudioChannel::new(Tracks::Ambience.to_string()), ChannelAudioState {loop_started: false}),
+        ChannelAudioState{ channel: AudioChannel::new(Tracks::Ambience.to_string()), loop_started: false },
     );
 
     audio_state.audio_tracks.insert(
         Tracks::Saucers,
-        (AudioChannel::new(Tracks::Saucers.to_string()), ChannelAudioState {loop_started: false}),
+        ChannelAudioState{ channel: AudioChannel::new(Tracks::Saucers.to_string()), loop_started: false },
     );
     audio_state.audio_tracks.insert(
         Tracks::Thrust,
-        (AudioChannel::new(Tracks::Thrust.to_string()), ChannelAudioState {loop_started: false}),
+        ChannelAudioState{ channel: AudioChannel::new(Tracks::Thrust.to_string()), loop_started: false },
     );
 
     audio_state

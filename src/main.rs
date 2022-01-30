@@ -785,7 +785,7 @@ fn player_system(
     textures: Res<TexturesResource>,
     time: Res<Time>,
     audio: Res<Audio>,
-    audio_state: Res<audio_helper::AudioState>,
+    mut audio_state: ResMut<audio_helper::AudioState>,
     mut query: Query<(
         &mut PlayerComponent,
         &mut Transform,
@@ -822,7 +822,7 @@ fn player_system(
             &audio_helper::Tracks::Thrust,
             &audio_helper::Sounds::Thrust,
             &audio,
-            &audio_state,
+            &mut audio_state,
         );
 
         // Too much trouble to implement rigid body like in Unity, so wrote my own.
@@ -862,7 +862,7 @@ fn player_system(
                 &shooter,
                 muzzle_transform,
                 audio,
-                audio_state,
+                &audio_state,
                 &time,
             );
         }
@@ -923,7 +923,7 @@ fn fire_bullet_from_player(
     shooter: &ShooterComponent,
     muzzle_transform: &GlobalTransform,
     audio: Res<Audio>,
-    audio_state: Res<audio_helper::AudioState>,
+    audio_state: &ResMut<audio_helper::AudioState>,
     time: &Res<Time>,
 ) {
     audio_helper::play_single_sound(
@@ -1041,7 +1041,7 @@ fn frame_rate(
 #[derive(SystemParam)]
 struct MySystemParam<'w, 's> {
     audio: Res<'w,Audio>,
-    audio_state: Res<'w, audio_helper::AudioState>,
+    audio_state: ResMut<'w, audio_helper::AudioState>,
     textures_resource: Res<'w, TexturesResource>,
     _query: Query<'w,'s, ()>
 }
@@ -1077,7 +1077,7 @@ fn scene_system(
         time: &Res<Time>,
         mut scene_controller: ResMut<SceneControllerResource>,
         audio: &Res<Audio>,
-        audio_state: &Res<audio_helper::AudioState>,
+        audio_state: &ResMut<audio_helper::AudioState>,
     ) {
         if scene_controller
             .next_jaws_sound_time
@@ -1251,7 +1251,7 @@ fn asteroid_collision_system(
     mut game_manager: ResMut<GameManagerResource>,
     textures_resource: Res<TexturesResource>,
     audio: Res<Audio>,
-    audio_state: Res<audio_helper::AudioState>,
+    audio_state: ResMut<audio_helper::AudioState>,
 ) {
     for ev in ev_collision.iter() {
         {
