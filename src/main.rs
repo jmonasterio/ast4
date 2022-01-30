@@ -6,6 +6,7 @@ use bevy::{
     core::FixedTimestep,
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin}, //sprite::collide_aabb::{collide, Collision},
     prelude::*,
+    ecs::system::SystemParam,
     //    math::Vec3,
 };
 use bevy_render::camera::{DepthCalculation, ScalingMode, WindowOrigin};
@@ -460,17 +461,13 @@ struct TexturesResource {
     asteroid_small_index: usize,
 }
 
-fn seed_rng() {
-    //let start = std::time::SystemTime::now();
-    //let since_the_epoch = start
-    //    .duration_since(std::time::UNIX_EPOCH)
-    //    .expect("Time went backwards");
-    //let in_ms = since_the_epoch.as_secs();
-    let in_ms = 0u64;
+fn seed_rng( t: &Res<Time>) {
+    let in_ms = t.seconds_since_startup();
+    println!("seed: {}", in_ms);
     fastrand::seed(in_ms as u64);
 }
+
 fn main() {
-    seed_rng();
 
     let mut new_app = App::new();
 
@@ -568,9 +565,12 @@ fn setup(
     asset_server: Res<AssetServer>,
     mut texture_atlases: ResMut<Assets<TextureAtlas>>,
     mut textures_resource: ResMut<TexturesResource>,
+    time: Res<Time>,
     //scene_controller_resource: ResMut<SceneControllerResource>,
     //game_manager: ResMut<GameManagerResource>,
 ) {
+    seed_rng( &time);
+
     audio_helper::prepare_audio(&mut commands, asset_server.as_ref());
 
     // hot reloading of assets.
@@ -1037,29 +1037,37 @@ fn frame_rate(
     }
 }
 
-fn scene_system(
+// Reduce number of parmams :https://github.com/bevyengine/bevy/issues/3267
+#[derive(SystemParam)]
+struct MySystemParam<'w, 's> {
+    audio: Res<'w,Audio>,
+    audio_state: Res<'w, audio_helper::AudioState>,
+    textures_resource: Res<'w, TexturesResource>,
+    _query: Query<'w,'s, ()>
+}
+
+fn scene_system( 
     commands: Commands,
     mut scene_controller: ResMut<SceneControllerResource>,
     mut game_manager: ResMut<GameManagerResource>,
     keyboard_input: Res<Input<KeyCode>>,
     time: Res<Time>,
-    audio: Res<Audio>,
-    audio_state: Res<audio_helper::AudioState>,
-    textures_resource: Res<TexturesResource>,
+    common: MySystemParam,
 ) {
     match game_manager.state {
         State::Playing => {
-            update_ambience_sound(&time, scene_controller, &audio, &audio_state);
+            update_ambience_sound(&time, scene_controller, &common.audio, &common.audio_state);
         }
         State::Over => {
             // TODO: Turn off jaws sounds.
-            audio_helper::stop_looped_sound(&audio_helper::Tracks::Ambience, &audio, &audio_state);
+            audio_helper::stop_looped_sound(&audio_helper::Tracks::Ambience, &common.audio, &common.audio_state);
 
             if keyboard_input.pressed(KeyCode::Space) {
+                seed_rng(&time); // reseed again.
                 game_manager.lives = 4;
                 game_manager.score = 0;
                 game_manager.state = State::Playing;
-                scene_controller.start_game(commands, textures_resource, game_manager, &time);
+                scene_controller.start_game(commands, common.textures_resource, game_manager, &time);
             }
         }
     }
