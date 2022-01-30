@@ -40,13 +40,13 @@ pub struct AudioState {
     sound_handles: HashMap<Sounds, Handle<AudioSource>>,
 
     // Tracks/channel. For now, we don't need to keep data about each channel (ChannelAudioState)
-    audio_tracks: HashMap<Tracks, AudioChannel>,
+    audio_tracks: HashMap<Tracks, (AudioChannel, ChannelAudioState)>,
 }
-#[derive(Default)]
+#[derive(Default, Copy, Clone)]
 struct ChannelAudioState {
     //stopped: bool,
 //paused: bool,
-//loop_started: bool,
+    loop_started: bool,
 //volume: f32,
 }
 
@@ -59,15 +59,18 @@ pub fn start_looped_sound(
     if !audio_state.audio_loaded {
         return;
     }
-    let channel_id = audio_state.audio_tracks.get(track).unwrap(); // Get first channel.
-    audio.play_looped_in_channel(
+    let (channel_id, mut channel_state) = audio_state.audio_tracks.get(track).unwrap(); 
+    if !channel_state.loop_started {
+        audio.play_looped_in_channel(
         audio_state.sound_handles.get(sound).unwrap().clone(),
         channel_id,
-    );
+        );
+        channel_state.loop_started = true;
+    }
 }
 
 pub fn stop_looped_sound(track: &Tracks, audio: &Res<Audio>, audio_state: &Res<AudioState>) {
-    let channel_id = audio_state.audio_tracks.get(track).unwrap(); // Get first channel.
+    let (channel_id, _) = audio_state.audio_tracks.get(track).unwrap(); // Get first channel.
     audio.stop_channel(channel_id);
 }
 
@@ -80,10 +83,10 @@ pub fn play_single_sound(
     if !audio_state.audio_loaded {
         return;
     }
-    let channel_id = audio_state.audio_tracks.get(track).unwrap(); // Get first channel.
+    let (channel_id, _) = audio_state.audio_tracks.get(track).unwrap(); // Get first channel.
     audio.play_in_channel(
         audio_state.sound_handles.get(sound).unwrap().clone(),
-        channel_id,
+        channel_id, 
     );
 }
 
@@ -97,18 +100,20 @@ pub fn prepare_audio(commands: &mut Commands, asset_server: &AssetServer) {
 
     audio_state
         .audio_tracks
-        .insert(Tracks::Game, AudioChannel::new(Tracks::Game.to_string()));
+        .insert(Tracks::Game, (AudioChannel::new(Tracks::Game.to_string()), ChannelAudioState { loop_started: false}));
+
     audio_state.audio_tracks.insert(
         Tracks::Ambience,
-        AudioChannel::new(Tracks::Ambience.to_string()),
+        (AudioChannel::new(Tracks::Ambience.to_string()), ChannelAudioState {loop_started: false}),
     );
+
     audio_state.audio_tracks.insert(
         Tracks::Saucers,
-        AudioChannel::new(Tracks::Saucers.to_string()),
+        (AudioChannel::new(Tracks::Saucers.to_string()), ChannelAudioState {loop_started: false}),
     );
     audio_state.audio_tracks.insert(
         Tracks::Thrust,
-        AudioChannel::new(Tracks::Thrust.to_string()),
+        (AudioChannel::new(Tracks::Thrust.to_string()), ChannelAudioState {loop_started: false}),
     );
 
     audio_state
