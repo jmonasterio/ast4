@@ -70,8 +70,7 @@ impl FutureTime {
     fn is_expired(&self, t: &Time) -> bool {
         let now = t.seconds_since_startup();
         let future = self.seconds_since_startup_to_auto_destroy;
-        let is_expired = now > future;
-        is_expired
+        now > future
     }
 }
 
@@ -152,6 +151,7 @@ impl Default for State {
     }
 }
 
+// Combine with scene controller.
 #[derive(Default, Clone)]
 struct GameManagerResource {
     state: State,
@@ -163,9 +163,7 @@ struct GameManagerResource {
 impl GameManagerResource {
     fn player_killed(
         &mut self,
-        commands: &mut Commands,
         scene_controller: &mut ResMut<SceneControllerResource>,
-        textures_resource: &Res<TexturesResource>,
         time: &Res<Time>,
     ) {
         if self.lives > 0 {
@@ -173,18 +171,15 @@ impl GameManagerResource {
         }
         if self.lives < 1 {
             self.state = State::Over;
-            scene_controller.game_over(time);
+            scene_controller.game_over();
         } else {
-            // TODO: Wait a few seconds before respawning player, or we may
-            //  be killed by same asteroid.
-
             scene_controller.respawn_player_later(FutureTime::from_now(time, 0.5f64));
         }
     }
 }
 
 impl SceneControllerResource {
-    fn game_over(&mut self, time: &Res<Time>) {
+    fn game_over(&mut self) {
         // todo: stop all sounds.
 
         self.level = 0;
@@ -193,13 +188,13 @@ impl SceneControllerResource {
         //show_instructions( true);
     }
 
+    // We need to respawn player "later", so there:
+    //  1) aren't two players in one frame (dead and spawned)
+    //  2) Multiple hits with same asteroid after respawn
     fn respawn_player_later(&mut self, ft: FutureTime) {
         self.player_spawn_when = Some(ft);
     }
 
-    // TODO: We need to respawn player later, so there:
-    //  1) aren't two players in one frame.
-    //  2) Multiple hits with same asteroid after respawn
     fn respawn_player(
         &mut self,
         commands: &mut Commands,
@@ -439,11 +434,6 @@ struct FrameRateResource {
     fps_last: f64,
 }
 
-#[derive(Default, Clone)]
-struct GameStateResource {
-    level: u32,
-    next_free_life_score: u64,
-}
 
 // todo: not sure why this isn't part of gamestate.
 #[derive(Default, Clone)]
@@ -453,6 +443,7 @@ struct SceneControllerResource {
     jaw_interval_seconds: f64,
     jaws_alternate: bool,
     last_asteroid_killed_at: Option<FutureTime>,
+    next_free_life_score: u32,
 
     player_spawn_when: Option<FutureTime>,
 }
@@ -518,9 +509,11 @@ fn main() {
             ..Default::default()
         })
         .insert_resource(SceneControllerResource {
+            level: 0,
             jaw_interval_seconds: 0.9f64,
             jaws_alternate: false,
             next_jaws_sound_time: None,
+            next_free_life_score: FREE_USER_AT,
             ..Default::default()
         })
         .insert_resource(FrameRateResource {
@@ -528,10 +521,6 @@ fn main() {
             display_frame_rate: true,
             debug_sinusoidal_frame_rate: false,
             fps_last: 0f64,
-        })
-        .insert_resource(GameStateResource {
-            level: 0,
-            next_free_life_score: 10000,
         })
         .insert_resource(TexturesResource {
             ..Default::default()
@@ -911,9 +900,9 @@ fn player_system(
         }
     }
 
-    if time.seconds_since_startup() - player.last_hyperspace_time > 1.0f64 {
         // TBD: make a constant.
-        if keyboard_input.pressed(KeyCode::Return) {
+    if keyboard_input.pressed(KeyCode::Return) {
+        if time.seconds_since_startup() - player.last_hyperspace_time > 1.0f64 {
             transform.translation = make_random_pos(); // Not safe on purpose
             player.last_hyperspace_time = time.seconds_since_startup();
         }
@@ -973,7 +962,7 @@ fn fire_bullet_from_player(
         &audio_helper::Tracks::Game,
         &audio_helper::Sounds::Fire,
         &audio,
-        &audio_state,
+        audio_state,
     );
 
     commands
@@ -1079,7 +1068,7 @@ fn frame_rate(
     }
 }
 
-// Reduce number of parmams :https://github.com/bevyengine/bevy/issues/3267
+// Reduce number of params :https://github.com/bevyengine/bevy/issues/3267
 #[derive(SystemParam)]
 struct MySystemParam<'w, 's> {
     audio: Res<'w, Audio>,
@@ -1334,7 +1323,7 @@ fn asteroid_collision_system(
                         replace_asteroid_with(
                             &mut commands,
                             &textures_resource,
-                            &trans,
+                            trans,
                             2,
                             AsteroidSize::Medium,
                         );
@@ -1378,12 +1367,10 @@ fn asteroid_collision_system(
 
 // TODO: Lifes,etc.
 fn player_collision_system(
-    mut commands: Commands,
     mut ev_collision: EventReader<PlayerCollisionEvent>,
     mut query: Query<(Entity, &mut DeleteCleanupComponent)>,
     mut game_manager: ResMut<GameManagerResource>,
     mut scene_controller: ResMut<SceneControllerResource>,
-    textures_resource: Res<TexturesResource>,
     time: Res<Time>,
 ) {
     for ev in ev_collision.iter() {
@@ -1395,9 +1382,7 @@ fn player_collision_system(
 
             // Delete lifes
             game_manager.player_killed(
-                &mut commands,
                 &mut scene_controller,
-                &textures_resource,
                 &time,
             );
         }
@@ -1423,6 +1408,8 @@ fn delete_cleanup_system(
     }
 }
 
+// Start the next level when all asteroids gone.TexturesResource
+// TODO: Maybe a little delay here?
 fn level_system(
     mut commands: Commands,
     mut scene_controller_resource: ResMut<SceneControllerResource>,
