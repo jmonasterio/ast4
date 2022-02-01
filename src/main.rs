@@ -78,9 +78,10 @@ impl FutureTime {
 
 #[derive(Component)]
 struct Particle {
-    position: Vec3,
+    position: Vec3, // not really needed because we have entity (TODO)
     velocity: Vec3,
     lifetime: f32,
+    spin: f32,
 }
 
 fn update_particles(
@@ -97,37 +98,60 @@ fn update_particles(
         particle.lifetime -= dt;
         transform.translation = particle.position;
 
+        if particle.spin != 0.0f32 {
+            rotate_by_angle(&mut transform, particle.spin * time.delta_seconds());
+        }
+
         if particle.lifetime < 0.0f32 {
             commands.entity(entity).despawn_recursive();
         }
     });
 }
 
+struct ParticleEffect {
+    count: u16,
+    pos: Vec3,
+    scale: Vec3,
+    max_vel: f32,
+    min_lifetime: f32,
+    max_lifetime: f32,
+    texture_index: usize,
+    spin: f32,
+}
+
 fn create_particles(
     commands: &mut Commands,
     textures_resource: &Res<TexturesResource>,
-    count: u16,
-    pos: Vec3,
+    effect: &ParticleEffect,
 ) {
-    for _ in 0..count {
+    for _ in 0..effect.count {
         commands
             .spawn_bundle(SpriteSheetBundle {
                 texture_atlas: textures_resource.texture_atlas_handle.clone(), // TODO: How to avoid clone
-                sprite: TextureAtlasSprite::new(textures_resource.explosion_particle_index),
+                sprite: TextureAtlasSprite::new(effect.texture_index),
                 transform: Transform {
-                    scale: Vec3::splat(1.0),
+                    scale: effect.scale,
                     ..Default::default()
                 },
                 ..Default::default()
             })
             .insert(Particle {
-                position: pos,
-                velocity: make_random_velocity(100.0f32),
+                position: effect.pos,
+                velocity: make_random_velocity(effect.max_vel),
 
-                lifetime: random_range(1.0f32, 1.0f32),
+                lifetime: random_range(effect.min_lifetime, effect.max_lifetime),
+                spin: random_sign(random_range( effect.spin/2.0f32, effect.spin)),
             });
     }
     //}
+}
+
+fn random_sign( input:f32) -> f32
+{
+    if ::fastrand::f32()> 0.5f32 {
+        return -input;
+    }
+    input
 }
 
 fn random_range(min: f32, max: f32) -> f32 {
@@ -239,7 +263,7 @@ impl GameManagerResource {
             self.state = State::Over;
             scene_controller.game_over();
         } else {
-            scene_controller.respawn_player_later(FutureTime::from_now(time, 0.5f64));
+            scene_controller.respawn_player_later(FutureTime::from_now(time, 2.0f64));
         }
     }
 }
@@ -401,7 +425,7 @@ impl SceneControllerResource {
                 texture_atlas: textures_resource.texture_atlas_handle.clone(), // TODO: How to avoid clone
                 sprite: TextureAtlasSprite::new(index),
                 transform: Transform {
-                    scale: Vec3::splat(1.0),
+                    scale: Vec3::splat(1.0f32),
                     translation: p,
                     ..Default::default()
                 },
@@ -1374,7 +1398,19 @@ fn spawn_asteroid_or_alien_explosion(
     textures_resource: &Res<TexturesResource>,
     trans: &Transform,
 ) {
-    create_particles(commands, &textures_resource, 20, trans.translation);
+    create_particles(
+        commands, &textures_resource,
+        &ParticleEffect {
+            count: 20,
+            pos: trans.translation,
+            scale: bevy::prelude::Vec3::splat(1.0f32),
+            max_vel: 100.0f32,
+            min_lifetime: 0.9f32,
+            max_lifetime: 1.1f32,
+            texture_index: textures_resource.explosion_particle_index,
+            spin: 0.0f32,
+    },
+         );
 }
 
 // TODO: Can this be part of the regular asteroid_system?
@@ -1461,19 +1497,34 @@ fn asteroid_collision_system(
 
 // TODO: Lifes,etc.
 fn player_collision_system(
+    mut commands: Commands,
     mut ev_collision: EventReader<PlayerCollisionEvent>,
-    mut query: Query<(Entity, &mut DeleteCleanupComponent)>,
+    mut query: Query<(Entity, &mut DeleteCleanupComponent, &Transform)>,
     mut game_manager: ResMut<GameManagerResource>,
     mut scene_controller: ResMut<SceneControllerResource>,
+    textures_resource: Res<TexturesResource>,
     time: Res<Time>,
 ) {
     for ev in ev_collision.iter() {
         // This is pretty inefficient.
-        if let Ok((_, mut dcc)) = query.get_mut(ev.player) {
+        if let Ok((_, mut dcc, trans)) = query.get_mut(ev.player) {
             dcc.delete_after_frame = true;
 
-            // TODO: Create an explosion for player.
-
+            // Create an explosion for player.
+            create_particles(
+                &mut commands, &textures_resource,
+                &ParticleEffect {
+                    count: 5,
+                    pos: trans.translation,
+                    scale: bevy::prelude::Vec3::splat(1.0f32),
+                    max_vel: 100.0f32,
+                    min_lifetime: 1.5f32,
+                    max_lifetime: 2.0f32,
+                    texture_index: textures_resource.ship_particle_index,
+                    spin: 2.0f32,
+            },
+                 );
+        
             // Delete lifes
             game_manager.player_killed(&mut scene_controller, &time);
         }
