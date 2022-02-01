@@ -8,10 +8,12 @@ use bevy::{
     ecs::system::SystemParam,
     //    math::Vec3,
     prelude::*,
+    ecs::schedule::IntoRunCriteria,
+
 };
-use bevy_render::camera::{DepthCalculation, ScalingMode, WindowOrigin};
-//use bevy_rng::*;
 use bevy_kira_audio::{Audio, AudioPlugin};
+use bevy_prototype_lyon::prelude::*;
+use bevy_render::camera::{DepthCalculation, ScalingMode, WindowOrigin};
 
 //use bevy_window::*;
 //use bevy_winit::*;
@@ -34,6 +36,7 @@ mod math;
 // Despawn = Destroy
 // Resource = Singleton
 
+const DEBUG:bool = false;
 const TIME_STEP: f32 = 1.0 / 60.0;
 const PROJECT: &str = "AST4!";
 const WIDTH: f32 = 800.0f32;
@@ -76,6 +79,9 @@ impl FutureTime {
 
 #[derive(Component)]
 struct GameOverComponent;
+
+#[derive(Component)]
+struct DebugComponent;
 
 #[derive(Component)]
 struct Wrapped2dComponent;
@@ -434,7 +440,6 @@ struct FrameRateResource {
     fps_last: f64,
 }
 
-
 // todo: not sure why this isn't part of gamestate.
 #[derive(Default, Clone)]
 struct SceneControllerResource {
@@ -499,6 +504,7 @@ fn main() {
         //.add_plugin(LogDiagnosticsPlugin::default())  // TODO - put behind a flag
         //.add_plugin(FrameTimeDiagnosticsPlugin::default()) // TODO - put behind a flag
         .add_plugin(AudioPlugin)
+        .add_plugin(ShapePlugin)
         .add_event::<AsteroidCollisionEvent>()
         .add_event::<PlayerCollisionEvent>()
         .insert_resource(SceneControllerResource {
@@ -547,7 +553,10 @@ fn main() {
                 .with_system(asteroid_collision_system)
                 .with_system(player_collision_system)
                 .with_system(level_system)
-                .with_system(player_spawn_system),
+                .with_system(player_spawn_system)
+                // TODO: Figure out.
+                //.with_run_criteria(IntoRunCriteria::into( if DEBUG  {bevy::ecs::schedule::ShouldRun::Yes} else { bevy::ecs::schedule::ShouldRun::No}) )
+                .with_system(debug_system),
         )
         .add_system(frame_rate)
         .add_system(bevy::input::system::exit_on_esc_system)
@@ -900,7 +909,7 @@ fn player_system(
         }
     }
 
-        // TBD: make a constant.
+    // TBD: make a constant.
     if keyboard_input.pressed(KeyCode::Return) {
         if time.seconds_since_startup() - player.last_hyperspace_time > 1.0f64 {
             transform.translation = make_random_pos(); // Not safe on purpose
@@ -1381,10 +1390,7 @@ fn player_collision_system(
             // TODO: Create an explosion for player.
 
             // Delete lifes
-            game_manager.player_killed(
-                &mut scene_controller,
-                &time,
-            );
+            game_manager.player_killed(&mut scene_controller, &time);
         }
     }
 }
@@ -1405,6 +1411,45 @@ fn delete_cleanup_system(
         {
             commands.entity(ent).despawn_recursive();
         }
+    }
+}
+
+fn debug_system(
+    mut commands: Commands,
+    query: Query<(Entity, &DebugComponent)>,
+    bullet_query: Query<(Entity, &BulletComponent, &Transform)>, // Todo, ColliderComponent in each bullet (etc), would contain info about collision size.
+    player_query: Query<(Entity, &PlayerComponent, &Transform)>,
+    asteroid_query: Query<(Entity, &AsteroidComponent, &Transform)>,
+    alient_query: Query<(Entity, &AlienComponent, &Transform)>,
+) {
+    if !DEBUG {return};
+
+    // Delete all debug lines from last frame.
+    for (ent, _) in query.iter() {
+        commands.entity(ent).despawn_recursive();
+    }
+
+    let asteroid_array: Vec<(Entity, &AsteroidComponent, &Transform)> =
+        asteroid_query.iter().collect();
+
+    for (ee, ast, tr) in asteroid_array {
+        // Shape test
+        let shape = shapes::Circle {
+            radius: ast.hit_radius,
+            ..shapes::Circle::default()
+        };
+
+        commands
+            .spawn_bundle(GeometryBuilder::build_as(
+                &shape,
+                DrawMode::Stroke(StrokeMode::new(Color::YELLOW, 0.5f32)),
+                //DrawMode::Outlined {
+                //    fill_mode: FillMode::color(Color::CYAN),
+                //    outline_mode: StrokeMode::new(Color::WHITE, 1.0),
+                //},
+                Transform::from_translation(tr.translation),
+            ))
+            .insert(DebugComponent);
     }
 }
 
