@@ -8,9 +8,8 @@ use bevy::{
     ecs::system::SystemParam,
     //    math::Vec3,
     prelude::*,
-    ecs::schedule::IntoRunCriteria,
-
 };
+//use bevy::tasks::ComputeTaskPool;
 use bevy_kira_audio::{Audio, AudioPlugin};
 use bevy_prototype_lyon::prelude::*;
 use bevy_render::camera::{DepthCalculation, ScalingMode, WindowOrigin};
@@ -75,6 +74,65 @@ impl FutureTime {
         let future = self.seconds_since_startup_to_auto_destroy;
         now > future
     }
+}
+
+#[derive(Component)]
+struct Particle {
+    position: Vec3,
+    velocity: Vec3,
+    lifetime: f32,
+}
+
+fn update_particles(
+    mut commands: Commands,
+    time: Res<Time>,
+    //compute_task_pool: Res<ComputeTaskPool>,
+    mut particles: Query<(&mut Particle,Entity,&mut Transform)>,
+) {
+    let dt = time.delta_seconds_f64() as f32;
+    //particles.par_for_each_mut(&compute_task_pool, 32, move |(mut particle,entity)| {
+    particles.for_each_mut( move |(mut particle,entity, mut transform)| {
+        let velocity = particle.velocity * dt;
+        particle.position += velocity;
+        particle.lifetime -= dt;
+        transform.translation = particle.position;
+
+        if particle.lifetime < 0.0f32 {
+            commands.entity(entity).despawn_recursive();
+        }
+    });
+}
+
+fn create_particles(commands: &mut Commands, textures_resource: ResMut<TexturesResource>) {
+    //const PARTICLE_SYSTEM_COUNT: usize = 90;
+    const PARTICLE_COUNT: usize = 10000;
+
+    //for _ in 0..PARTICLE_SYSTEM_COUNT {
+        for _ in 0..PARTICLE_COUNT {
+            commands.spawn_bundle(SpriteSheetBundle {
+                texture_atlas: textures_resource.texture_atlas_handle.clone(), // TODO: How to avoid clone
+                sprite: TextureAtlasSprite::new(textures_resource.explosion_particle_index),
+                transform: Transform {
+                    scale: Vec3::splat(1.0),
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .insert(Particle {
+                position: Vec3::splat(240.0f32),
+                velocity: make_random_velocity(150.0f32),
+
+                lifetime: random_range(10.0f32, 100.0f32),
+            });
+        }
+    //}
+}
+
+fn random_range( min:f32, max:f32 ) -> f32 {
+    let random = ::fastrand::f32();
+    let range = max-min;
+    let adjustment = range*random;
+    min+adjustment
 }
 
 #[derive(Component)]
@@ -461,6 +519,8 @@ struct TexturesResource {
     asteroid_large_index: usize,
     asteroid_medium_index: usize,
     asteroid_small_index: usize,
+    explosion_particle_index: usize,
+    ship_particle_index: usize,
 
     asteroid_large_hit_radius: f32,
     asteroid_medium_hit_radius: f32,
@@ -554,6 +614,7 @@ fn main() {
                 .with_system(player_collision_system)
                 .with_system(level_system)
                 .with_system(player_spawn_system)
+                .with_system(update_particles)
                 // TODO: Figure out.
                 //.with_run_criteria(IntoRunCriteria::into( if DEBUG  {bevy::ecs::schedule::ShouldRun::Yes} else { bevy::ecs::schedule::ShouldRun::No}) )
                 .with_system(debug_system),
@@ -604,6 +665,7 @@ fn setup(
     commands.spawn_bundle(new_camera_2d());
     commands.spawn_bundle(UiCameraBundle::default());
 
+
     let texture_handle = asset_server.load("textures/Atlas.png");
     let mut texture_atlas = TextureAtlas::new_empty(texture_handle, Vec2::new(128.0, 128.0));
     textures_resource.player_index = TextureAtlas::add_texture(
@@ -644,6 +706,18 @@ fn setup(
     textures_resource.asteroid_small_index =
         TextureAtlas::add_texture(&mut texture_atlas, small_asteroid_rect);
     textures_resource.asteroid_small_hit_radius = small_asteroid_rect.width() / 2.0f32;
+
+    textures_resource.explosion_particle_index =
+        TextureAtlas::add_texture(&mut texture_atlas, bevy::sprite::Rect {
+            min: Vec2::new(23.0, 41.0),
+            max: Vec2::new(24.0, 42.0),
+        });
+
+    textures_resource.ship_particle_index =
+        TextureAtlas::add_texture(&mut texture_atlas, bevy::sprite::Rect {
+            min: Vec2::new(37.0, 38.0),
+            max: Vec2::new(44.0, 53.0),
+        });
 
     //let texture_atlas = TextureAtlas::from_grid(texture_handle, Vec2::new(25.0,25.0),1,1);
 
@@ -797,6 +871,8 @@ fn setup(
         })
         .insert(LivesComponent)
         .insert(Visibility { is_visible: true });
+
+    create_particles(&mut commands, textures_resource);
 }
 
 fn wrapped_2d_system(mut query: Query<(&Wrapped2dComponent, &mut Transform)>) {
