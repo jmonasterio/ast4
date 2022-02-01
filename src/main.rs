@@ -35,7 +35,7 @@ mod math;
 // Despawn = Destroy
 // Resource = Singleton
 
-const DEBUG:bool = false;
+const DEBUG: bool = false;
 const TIME_STEP: f32 = 1.0 / 60.0;
 const PROJECT: &str = "AST4!";
 const WIDTH: f32 = 800.0f32;
@@ -87,11 +87,11 @@ fn update_particles(
     mut commands: Commands,
     time: Res<Time>,
     //compute_task_pool: Res<ComputeTaskPool>,
-    mut particles: Query<(&mut Particle,Entity,&mut Transform)>,
+    mut particles: Query<(&mut Particle, Entity, &mut Transform)>,
 ) {
     let dt = time.delta_seconds_f64() as f32;
     //particles.par_for_each_mut(&compute_task_pool, 32, move |(mut particle,entity)| {
-    particles.for_each_mut( move |(mut particle,entity, mut transform)| {
+    particles.for_each_mut(move |(mut particle, entity, mut transform)| {
         let velocity = particle.velocity * dt;
         particle.position += velocity;
         particle.lifetime -= dt;
@@ -103,13 +103,15 @@ fn update_particles(
     });
 }
 
-fn create_particles(commands: &mut Commands, textures_resource: ResMut<TexturesResource>) {
-    //const PARTICLE_SYSTEM_COUNT: usize = 90;
-    const PARTICLE_COUNT: usize = 10000;
-
-    //for _ in 0..PARTICLE_SYSTEM_COUNT {
-        for _ in 0..PARTICLE_COUNT {
-            commands.spawn_bundle(SpriteSheetBundle {
+fn create_particles(
+    commands: &mut Commands,
+    textures_resource: &Res<TexturesResource>,
+    count: u16,
+    pos: Vec3,
+) {
+    for _ in 0..count {
+        commands
+            .spawn_bundle(SpriteSheetBundle {
                 texture_atlas: textures_resource.texture_atlas_handle.clone(), // TODO: How to avoid clone
                 sprite: TextureAtlasSprite::new(textures_resource.explosion_particle_index),
                 transform: Transform {
@@ -119,20 +121,20 @@ fn create_particles(commands: &mut Commands, textures_resource: ResMut<TexturesR
                 ..Default::default()
             })
             .insert(Particle {
-                position: Vec3::splat(240.0f32),
-                velocity: make_random_velocity(150.0f32),
+                position: pos,
+                velocity: make_random_velocity(100.0f32),
 
-                lifetime: random_range(10.0f32, 100.0f32),
+                lifetime: random_range(1.0f32, 1.0f32),
             });
-        }
+    }
     //}
 }
 
-fn random_range( min:f32, max:f32 ) -> f32 {
+fn random_range(min: f32, max: f32) -> f32 {
     let random = ::fastrand::f32();
-    let range = max-min;
-    let adjustment = range*random;
-    min+adjustment
+    let range = max - min;
+    let adjustment = range * random;
+    min + adjustment
 }
 
 #[derive(Component)]
@@ -665,7 +667,6 @@ fn setup(
     commands.spawn_bundle(new_camera_2d());
     commands.spawn_bundle(UiCameraBundle::default());
 
-
     let texture_handle = asset_server.load("textures/Atlas.png");
     let mut texture_atlas = TextureAtlas::new_empty(texture_handle, Vec2::new(128.0, 128.0));
     textures_resource.player_index = TextureAtlas::add_texture(
@@ -707,17 +708,21 @@ fn setup(
         TextureAtlas::add_texture(&mut texture_atlas, small_asteroid_rect);
     textures_resource.asteroid_small_hit_radius = small_asteroid_rect.width() / 2.0f32;
 
-    textures_resource.explosion_particle_index =
-        TextureAtlas::add_texture(&mut texture_atlas, bevy::sprite::Rect {
-            min: Vec2::new(23.0, 41.0),
-            max: Vec2::new(24.0, 42.0),
-        });
+    textures_resource.explosion_particle_index = TextureAtlas::add_texture(
+        &mut texture_atlas,
+        bevy::sprite::Rect {
+            min: Vec2::new(49.0, 65.0),
+            max: Vec2::new(52.0, 68.0),
+        },
+    );
 
-    textures_resource.ship_particle_index =
-        TextureAtlas::add_texture(&mut texture_atlas, bevy::sprite::Rect {
-            min: Vec2::new(37.0, 38.0),
-            max: Vec2::new(44.0, 53.0),
-        });
+    textures_resource.ship_particle_index = TextureAtlas::add_texture(
+        &mut texture_atlas,
+        bevy::sprite::Rect {
+            min: Vec2::new(40.0, 34.0),
+            max: Vec2::new(47.0, 49.0),
+        },
+    );
 
     //let texture_atlas = TextureAtlas::from_grid(texture_handle, Vec2::new(25.0,25.0),1,1);
 
@@ -871,8 +876,6 @@ fn setup(
         })
         .insert(LivesComponent)
         .insert(Visibility { is_visible: true });
-
-    create_particles(&mut commands, textures_resource);
 }
 
 fn wrapped_2d_system(mut query: Query<(&Wrapped2dComponent, &mut Transform)>) {
@@ -1366,7 +1369,13 @@ fn replace_asteroid_with(
     // TODO: Give momentum from the bullet.
 }
 
-fn spawn_asteroid_or_alien_explosion(_: &Transform) {}
+fn spawn_asteroid_or_alien_explosion(
+    mut commands: &mut Commands,
+    textures_resource: &Res<TexturesResource>,
+    trans: &Transform,
+) {
+    create_particles(commands, &textures_resource, 20, trans.translation);
+}
 
 // TODO: Can this be part of the regular asteroid_system?
 // TODO: Split asteroid into smaller parts, or destroy it. Show explosions.
@@ -1427,7 +1436,7 @@ fn asteroid_collision_system(
                         game_manager.score += 100;
                     }
                 }
-                spawn_asteroid_or_alien_explosion(trans);
+                spawn_asteroid_or_alien_explosion( &mut commands, &textures_resource, trans);
             }
         }
 
@@ -1498,7 +1507,9 @@ fn debug_system(
     asteroid_query: Query<(Entity, &AsteroidComponent, &Transform)>,
     alient_query: Query<(Entity, &AlienComponent, &Transform)>,
 ) {
-    if !DEBUG {return};
+    if !DEBUG {
+        return;
+    };
 
     // Delete all debug lines from last frame.
     for (ent, _) in query.iter() {
