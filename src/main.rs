@@ -194,6 +194,10 @@ struct AlienComponent {
 #[derive(Component)]
 struct MuzzleComponent;
 
+#[derive(Component)]
+struct PlayerHitComponent;
+
+
 #[derive(Component, Default)]
 struct PlayerComponent {
     pub thrust: f32,
@@ -340,6 +344,66 @@ impl SceneControllerResource {
             .id();
 
         commands.entity(player_id).push_children(&[muzzle_id]);
+
+        let hit_points: [Entity; 5] = [
+            commands
+                .spawn()
+                .insert(Transform {
+                    translation: Vec3::new(0f32, 15f32, 0f32),
+                    ..Default::default()
+                })
+                .insert(GlobalTransform {
+                    ..Default::default()
+                })
+                .insert(PlayerHitComponent {})
+                .id(),
+            commands
+                .spawn()
+                .insert(Transform {
+                    translation: Vec3::new(-12.5f32, -15f32, 0f32),
+                    ..Default::default()
+                })
+                .insert(GlobalTransform {
+                    ..Default::default()
+                })
+                .insert(PlayerHitComponent {})
+                .id(),
+            commands
+                .spawn()
+                .insert(Transform {
+                    translation: Vec3::new(12.5f32, -15f32, 0f32),
+                    ..Default::default()
+                })
+                .insert(GlobalTransform {
+                    ..Default::default()
+                })
+                .insert(PlayerHitComponent {})
+                .id(),
+            commands
+                .spawn()
+                .insert(Transform {
+                    translation: Vec3::new(6.25f32, 0f32, 0f32),
+                    ..Default::default()
+                })
+                .insert(GlobalTransform {
+                    ..Default::default()
+                })
+                .insert(PlayerHitComponent {})
+                .id(),
+            commands
+                .spawn()
+                .insert(Transform {
+                    translation: Vec3::new(-6.25f32, 0f32, 0f32),
+                    ..Default::default()
+                })
+                .insert(GlobalTransform {
+                    ..Default::default()
+                })
+                .insert(PlayerHitComponent {})
+                .id(),
+    ];
+
+        commands.entity(player_id).push_children( &hit_points);
     }
 
     fn start_game(
@@ -437,9 +501,9 @@ impl SceneControllerResource {
             })
             .insert(Wrapped2dComponent)
             .insert(VelocityComponent {
-                v: make_random_velocity(300f32),
-                max_speed: 300.0f32,
+                v: make_random_velocity(200f32), 
                 spin: 1.0f32,
+                max_speed: 200f32,
             })
             .insert(DeleteCleanupComponent {
                 delete_after_frame: false,
@@ -1118,8 +1182,8 @@ fn make_random_pos() -> Vec3 {
 
 // TODO: This makes some very slow speeds and need to fix that.
 fn make_random_velocity(max_speed: f32) -> Vec3 {
-    let x = fastrand::f32() - 0.5f32;
-    let y = fastrand::f32() - 0.5f32;
+    let x = random_sign(random_range( 0.5f32, 1f32));
+    let y = random_sign(random_range( 0.5f32, 1f32));
     let speed = fastrand::f32() * max_speed;
     speed * Vec3::new(x, y, 0f32)
 }
@@ -1273,7 +1337,8 @@ fn collision_system(
     bullet_query: Query<(Entity, &BulletComponent, &Transform)>, // Todo, ColliderComponent in each bullet (etc), would contain info about collision size.
     player_query: Query<(Entity, &PlayerComponent, &Transform)>,
     asteroid_query: Query<(Entity, &AsteroidComponent, &Transform)>,
-    alient_query: Query<(Entity, &AlienComponent, &Transform)>,
+    //alient_query: Query<(Entity, &AlienComponent, &Transform)>,
+    hit_point_query: Query<(Entity, &PlayerHitComponent, &GlobalTransform)>,
 ) {
     // Detect:
     //  player -> bullet
@@ -1299,7 +1364,8 @@ fn collision_system(
     assert!(player_array.len() <= 1);
     let asteroid_array: Vec<(Entity, &AsteroidComponent, &Transform)> =
         asteroid_query.iter().collect();
-    let _alien_array: Vec<(Entity, &AlienComponent, &Transform)> = alient_query.iter().collect();
+    //let _alien_array: Vec<(Entity, &AlienComponent, &Transform)> = alient_query.iter().collect();
+    let hitpoint_array: Vec<(Entity,&PlayerHitComponent, &GlobalTransform)> = hit_point_query.iter().collect();
 
     fn make_area_around(t: &Transform, radius: f32) -> quadtree_rs::area::Area<i16> {
         let r = radius as i16;
@@ -1334,7 +1400,7 @@ fn collision_system(
     }
 
     for (bul_ent, _, bul_trans) in &bullet_array {
-        let near_bullet_area = make_area_around(bul_trans, 25.0f32);
+        let near_bullet_area = make_area_around(bul_trans, 30.0f32);
 
         // TODO: Is the first returned asteroid, really the closest?
 
@@ -1350,25 +1416,29 @@ fn collision_system(
                     asteroid: ast_ent,
                     hit_by: *bul_ent,
                 });
+                break;
             }
         }
     }
 
     for (player_ent, _, play_trans) in &player_array {
-        let near_bullet_area = make_area_around(play_trans, 25.0f32); // TOD: hardcode
-        for entry in asteroid_qt.query(near_bullet_area) {
+        let near_player_area = make_area_around(play_trans, 100.0f32); // TOD: hardcode
+        for entry in asteroid_qt.query(near_player_area) {
             let idx = entry.value_ref();
             let (ast_ent, ast_comp, ast_trans) = asteroid_array[*idx];
 
-            let d = play_trans.translation.distance(ast_trans.translation);
+            // We really want to see whether the hit points of the ship is inside
+            //  the radius of the asteroid. Ignore shape, of asteroid -- assume circle
+            for (_,_,glob_trns) in &hitpoint_array {
 
-            // TODO: We really want to see whether the triangle of the ship is inside
-            //  the radius of the asteroid. Ignore shape, of asteroid.
-            if d < ast_comp.hit_radius {
-                ev_player_collision.send(PlayerCollisionEvent {
-                    player: *player_ent,
-                    hit_by: ast_ent,
-                });
+                let d = glob_trns.translation.distance(ast_trans.translation);
+                if d < ast_comp.hit_radius {
+                    ev_player_collision.send(PlayerCollisionEvent {
+                        player: *player_ent,
+                        hit_by: ast_ent,
+                    });
+                    break;
+                }
             }
         }
     }
@@ -1557,6 +1627,7 @@ fn debug_system(
     player_query: Query<(Entity, &PlayerComponent, &Transform)>,
     asteroid_query: Query<(Entity, &AsteroidComponent, &Transform)>,
     alient_query: Query<(Entity, &AlienComponent, &Transform)>,
+    hit_points: Query<(Entity, &PlayerHitComponent, &GlobalTransform)>,
 ) {
     if !DEBUG {
         return;
@@ -1589,6 +1660,30 @@ fn debug_system(
             ))
             .insert(DebugComponent);
     }
+
+    let hit_point_array: Vec<(Entity, &PlayerHitComponent, &GlobalTransform)> =
+        hit_points.iter().collect();
+
+    for (ee, ast, tr) in hit_point_array {
+        // Shape test
+        let shape = shapes::Circle {
+            radius: 2.0f32,
+            ..shapes::Circle::default()
+        };
+
+        commands
+            .spawn_bundle(GeometryBuilder::build_as(
+                &shape,
+                DrawMode::Stroke(StrokeMode::new(Color::GREEN, 0.5f32)),
+                //DrawMode::Outlined {
+                //    fill_mode: FillMode::color(Color::CYAN),
+                //    outline_mode: StrokeMode::new(Color::WHITE, 1.0),
+                //},
+                Transform::from_translation(tr.translation),
+            ))
+            .insert(DebugComponent);
+    }
+
 }
 
 // Start the next level when all asteroids gone.TexturesResource
