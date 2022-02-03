@@ -423,7 +423,7 @@ impl SceneControllerResource {
         //self.show_instructions(false);
         self.clear_bullets();
 
-        self.clear_asteroids();
+        self.clear_asteroids_at_end_of_frame = true;
         self.clear_aliens();
         self.start_level(&mut commands, &textures_resource, time);
         self.respawn_player_later(FutureTime::from_now(time, 0.5f64));
@@ -444,9 +444,6 @@ impl SceneControllerResource {
     }
 
     fn clear_bullets(&mut self) {
-        // TODO
-    }
-    fn clear_asteroids(&mut self) {
         // TODO
     }
     fn clear_aliens(&mut self) {}
@@ -602,6 +599,7 @@ struct SceneControllerResource {
     next_free_life_score: u32,
 
     player_spawn_when: Option<FutureTime>,
+    clear_asteroids_at_end_of_frame: bool,
 }
 
 #[derive(Default, Clone)]
@@ -692,6 +690,7 @@ fn main() {
             SystemStage::single_threaded(),
         )
         .add_system_to_stage(DELETE_CLEANUP_STAGE, delete_cleanup_system)
+        .add_system_to_stage(DELETE_CLEANUP_STAGE, clear_at_game_start_system)
         .add_system_set(
             SystemSet::new()
                 .with_run_criteria(FixedTimestep::step(TIME_STEP as f64))
@@ -713,7 +712,8 @@ fn main() {
                 .with_system(debug_system),
         )
         .add_system(frame_rate)
-        .add_system(bevy::input::system::exit_on_esc_system)
+        // TODO: Only if windows.
+        //.add_system(bevy::input::system::exit_on_esc_system)
         .run();
 }
 
@@ -967,6 +967,10 @@ fn setup(
         })
         .insert(LivesComponent)
         .insert(Visibility { is_visible: true });
+
+        // Create an explosion for player.
+
+        
 }
 
 fn wrapped_2d_system(mut query: Query<(&Wrapped2dComponent, &mut Transform)>) {
@@ -1104,7 +1108,7 @@ impl PlayerComponent {
                 rotate_by_angle(transform, horz * self.rotate_speed * time.delta_seconds());
 
             // In case we have to stop, this will be the snap angle.
-            let nearest = math::round_to_nearest_multiple(
+            let nearest = round_to_nearest_multiple(
                 target_angle + horz * self.angle_increment, // tbd: this may be laggy.
                 self.angle_increment,
             );
@@ -1189,20 +1193,42 @@ fn make_random_pos() -> Vec3 {
 
 // TODO: This makes some very slow speeds and need to fix that.
 fn make_random_velocity(max_speed: f32) -> Vec3 {
-    let x = random_sign(random_range(0.5f32, 1f32));
-    let y = random_sign(random_range(0.5f32, 1f32));
-    let speed = fastrand::f32() * max_speed;
+    let x = random_sign(::fastrand::f32());
+    let y = random_sign(::fastrand::f32());
+    let speed = random_range( max_speed/2.0f32, max_speed);
     speed * Vec3::new(x, y, 0f32)
 }
 
 // Show or hide instructions based on game state.
 fn game_over_system(
+    mut commands: Commands,
+    time: Res<Time>,
+    textures_resource: Res<TexturesResource>,
     game_manager: Res<GameManagerResource>,
     mut query: Query<(&mut Visibility, &GameOverComponent)>,
 ) {
     let is_over = game_manager.state == State::Over;
     for (mut vis, _) in query.iter_mut() {
         vis.is_visible = is_over;
+    }
+
+    if is_over {
+        create_particles(
+            &mut commands,
+            &textures_resource,
+            &ParticleEffect {
+                count: (500.0f32 * time.delta_seconds()) as u16,
+                pos: Vec3::new(0.53f32* WIDTH, 0.6f32*HEIGHT, 0.0f32),
+                scale: bevy::prelude::Vec3::splat(0.5f32),
+                max_vel: 300.0f32,
+                min_lifetime: 1.5f32,
+                max_lifetime: 4.0f32,
+                texture_index: textures_resource.explosion_particle_index,
+                spin: 0.0f32,
+                fade: 0.80f32,
+            },
+        );
+
     }
 }
 
@@ -1629,6 +1655,22 @@ fn delete_cleanup_system(
             commands.entity(ent).despawn_recursive();
         }
     }
+}
+
+fn clear_at_game_start_system(
+    mut commands: Commands,
+    query: Query<(Entity, &AsteroidComponent)>,
+    mut scene_controller: ResMut<SceneControllerResource>,
+
+) {
+    if scene_controller.clear_asteroids_at_end_of_frame {
+        println!("clearing asteroids");
+        for ( ent, _) in query.iter()  {
+            println!("deleting asteroid");
+            commands.entity(ent).despawn_recursive();
+        }
+        scene_controller.clear_asteroids_at_end_of_frame = false;
+    } 
 }
 
 fn debug_system(
