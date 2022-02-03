@@ -4,9 +4,9 @@ This is my first Rust program. Be gentle.
 
 Still working on it, but actually playable.
 
-You can play it here: [AST4 Game Link][https://jmonasterio.github.io/ast4/]
+You can play it here: [AST4 Game Link](https://jmonasterio.github.io/ast4/)
 
-Link to *old* unity version [old version][https://github.com/jmonasterio/ast3]
+Link to *old* unity version [old version](https://github.com/jmonasterio/ast3)
 
 
 NOTES to SELF:

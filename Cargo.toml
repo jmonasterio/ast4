@@ -3,6 +3,8 @@ name = "ast4"
 version = "0.1.13"
 edition = "2021"
 build = "build.rs"
+authors = "jmonasterio"
+description = "Asteroids arcade game clone"
 
 [build-dependencies]
 built = {version="0.5", features=["git2","chrono", "semver"]}
