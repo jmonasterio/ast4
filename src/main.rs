@@ -17,7 +17,6 @@ use bevy_render::camera::{DepthCalculation, ScalingMode, WindowOrigin};
 //use bevy_window::*;
 //use bevy_winit::*;
 mod audio_helper;
-mod math;
 
 // TODO: Shooter not shooting straight.
 // TODO: Cooler asset loader: https://www.nikl.me/blog/2021/asset-handling-in-bevy-apps/#:~:text=Most%20games%20have%20some%20sort%20of%20loading%20screen,later%20states%20can%20use%20them%20through%20the%20ECS.
@@ -82,6 +81,7 @@ struct Particle {
     velocity: Vec3,
     lifetime: f32,
     spin: f32,
+    fade: f32,
 }
 
 fn update_particles(
@@ -101,6 +101,9 @@ fn update_particles(
         if particle.spin != 0.0f32 {
             rotate_by_angle(&mut transform, particle.spin * time.delta_seconds());
         }
+        if particle.fade != 0.0f32 {
+            transform.scale *= (1.0f32 - particle.fade * time.delta_seconds());
+        }
 
         if particle.lifetime < 0.0f32 {
             commands.entity(entity).despawn_recursive();
@@ -117,6 +120,7 @@ struct ParticleEffect {
     max_lifetime: f32,
     texture_index: usize,
     spin: f32,
+    fade: f32,
 }
 
 fn create_particles(
@@ -140,15 +144,15 @@ fn create_particles(
                 velocity: make_random_velocity(effect.max_vel),
 
                 lifetime: random_range(effect.min_lifetime, effect.max_lifetime),
-                spin: random_sign(random_range( effect.spin/2.0f32, effect.spin)),
+                spin: random_sign(random_range(effect.spin / 2.0f32, effect.spin)),
+                fade: effect.fade,
             });
     }
     //}
 }
 
-fn random_sign( input:f32) -> f32
-{
-    if ::fastrand::f32()> 0.5f32 {
+fn random_sign(input: f32) -> f32 {
+    if ::fastrand::f32() > 0.5f32 {
         return -input;
     }
     input
@@ -196,7 +200,6 @@ struct MuzzleComponent;
 
 #[derive(Component)]
 struct PlayerHitComponent;
-
 
 #[derive(Component, Default)]
 struct PlayerComponent {
@@ -401,9 +404,9 @@ impl SceneControllerResource {
                 })
                 .insert(PlayerHitComponent {})
                 .id(),
-    ];
+        ];
 
-        commands.entity(player_id).push_children( &hit_points);
+        commands.entity(player_id).push_children(&hit_points);
     }
 
     fn start_game(
@@ -501,7 +504,7 @@ impl SceneControllerResource {
             })
             .insert(Wrapped2dComponent)
             .insert(VelocityComponent {
-                v: make_random_velocity(200f32), 
+                v: make_random_velocity(200f32),
                 spin: 1.0f32,
                 max_speed: 200f32,
             })
@@ -1085,6 +1088,10 @@ fn player_system(
     }
 }
 
+pub fn round_to_nearest_multiple(f: f32, multiple: f32) -> f32 {
+    f32::round(f / multiple) * multiple
+}
+
 impl PlayerComponent {
     pub fn rotate_to_angle_with_snap(
         &mut self,
@@ -1182,8 +1189,8 @@ fn make_random_pos() -> Vec3 {
 
 // TODO: This makes some very slow speeds and need to fix that.
 fn make_random_velocity(max_speed: f32) -> Vec3 {
-    let x = random_sign(random_range( 0.5f32, 1f32));
-    let y = random_sign(random_range( 0.5f32, 1f32));
+    let x = random_sign(random_range(0.5f32, 1f32));
+    let y = random_sign(random_range(0.5f32, 1f32));
     let speed = fastrand::f32() * max_speed;
     speed * Vec3::new(x, y, 0f32)
 }
@@ -1365,7 +1372,8 @@ fn collision_system(
     let asteroid_array: Vec<(Entity, &AsteroidComponent, &Transform)> =
         asteroid_query.iter().collect();
     //let _alien_array: Vec<(Entity, &AlienComponent, &Transform)> = alient_query.iter().collect();
-    let hitpoint_array: Vec<(Entity,&PlayerHitComponent, &GlobalTransform)> = hit_point_query.iter().collect();
+    let hitpoint_array: Vec<(Entity, &PlayerHitComponent, &GlobalTransform)> =
+        hit_point_query.iter().collect();
 
     fn make_area_around(t: &Transform, radius: f32) -> quadtree_rs::area::Area<i16> {
         let r = radius as i16;
@@ -1429,8 +1437,7 @@ fn collision_system(
 
             // We really want to see whether the hit points of the ship is inside
             //  the radius of the asteroid. Ignore shape, of asteroid -- assume circle
-            for (_,_,glob_trns) in &hitpoint_array {
-
+            for (_, _, glob_trns) in &hitpoint_array {
                 let d = glob_trns.translation.distance(ast_trans.translation);
                 if d < ast_comp.hit_radius {
                     ev_player_collision.send(PlayerCollisionEvent {
@@ -1469,18 +1476,20 @@ fn spawn_asteroid_or_alien_explosion(
     trans: &Transform,
 ) {
     create_particles(
-        commands, &textures_resource,
+        commands,
+        textures_resource,
         &ParticleEffect {
             count: 20,
             pos: trans.translation,
             scale: bevy::prelude::Vec3::splat(1.0f32),
-            max_vel: 100.0f32,
+            max_vel: 50.0f32,
             min_lifetime: 0.9f32,
             max_lifetime: 1.1f32,
             texture_index: textures_resource.explosion_particle_index,
             spin: 0.0f32,
-    },
-         );
+            fade: 0.8f32,
+        },
+    );
 }
 
 // TODO: Can this be part of the regular asteroid_system?
@@ -1542,7 +1551,7 @@ fn asteroid_collision_system(
                         game_manager.score += 100;
                     }
                 }
-                spawn_asteroid_or_alien_explosion( &mut commands, &textures_resource, trans);
+                spawn_asteroid_or_alien_explosion(&mut commands, &textures_resource, trans);
             }
         }
 
@@ -1582,7 +1591,8 @@ fn player_collision_system(
 
             // Create an explosion for player.
             create_particles(
-                &mut commands, &textures_resource,
+                &mut commands,
+                &textures_resource,
                 &ParticleEffect {
                     count: 5,
                     pos: trans.translation,
@@ -1592,9 +1602,10 @@ fn player_collision_system(
                     max_lifetime: 2.0f32,
                     texture_index: textures_resource.ship_particle_index,
                     spin: 2.0f32,
-            },
-                 );
-        
+                    fade: 0.95f32,
+                },
+            );
+
             // Delete lifes
             game_manager.player_killed(&mut scene_controller, &time);
         }
@@ -1683,7 +1694,6 @@ fn debug_system(
             ))
             .insert(DebugComponent);
     }
-
 }
 
 // Start the next level when all asteroids gone.TexturesResource
