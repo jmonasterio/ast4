@@ -1664,9 +1664,7 @@ fn clear_at_game_start_system(
 
 ) {
     if scene_controller.clear_asteroids_at_end_of_frame {
-        println!("clearing asteroids");
         for ( ent, _) in query.iter()  {
-            println!("deleting asteroid");
             commands.entity(ent).despawn_recursive();
         }
         scene_controller.clear_asteroids_at_end_of_frame = false;
