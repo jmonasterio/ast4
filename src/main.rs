@@ -84,6 +84,7 @@ struct Particle {
     fade: f32,
 }
 
+// Simple particle system updater.
 fn update_particles(
     mut commands: Commands,
     time: Res<Time>,
@@ -419,12 +420,8 @@ impl SceneControllerResource {
         self.level = 0;
         game_manager.next_free_life_score = FREE_USER_AT;
 
-        //self.show_game_over(false);
-        //self.show_instructions(false);
-        self.clear_bullets();
+        self.game_started_this_frame = true;
 
-        self.clear_asteroids_at_end_of_frame = true;
-        self.clear_aliens();
         self.start_level(&mut commands, &textures_resource, time);
         self.respawn_player_later(FutureTime::from_now(time, 0.5f64));
     }
@@ -599,7 +596,7 @@ struct SceneControllerResource {
     next_free_life_score: u32,
 
     player_spawn_when: Option<FutureTime>,
-    clear_asteroids_at_end_of_frame: bool,
+    game_started_this_frame: bool,
 }
 
 #[derive(Default, Clone)]
@@ -1663,12 +1660,14 @@ fn clear_at_game_start_system(
     mut scene_controller: ResMut<SceneControllerResource>,
 
 ) {
-    if scene_controller.clear_asteroids_at_end_of_frame {
+    if scene_controller.game_started_this_frame {
         for ( ent, _) in query.iter()  {
             commands.entity(ent).despawn_recursive();
         }
-        scene_controller.clear_asteroids_at_end_of_frame = false;
+        scene_controller.game_started_this_frame = false;
     } 
+
+    // todo: clear bullets and aliens?
 }
 
 fn debug_system(
