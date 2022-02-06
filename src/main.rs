@@ -18,7 +18,6 @@ use bevy_render::camera::{DepthCalculation, ScalingMode, WindowOrigin};
 //use bevy_winit::*;
 mod audio_helper;
 
-// TODO: Shooter not shooting straight.
 // TODO: Cooler asset loader: https://www.nikl.me/blog/2021/asset-handling-in-bevy-apps/#:~:text=Most%20games%20have%20some%20sort%20of%20loading%20screen,later%20states%20can%20use%20them%20through%20the%20ECS.
 // TODO: Inspector:  https://bevy-cheatbook.github.io/setup/bevy-tools.html
 // TODO: Investigate: MrGVSV/bevy_proto
@@ -77,7 +76,6 @@ impl FutureTime {
 
 #[derive(Component)]
 struct Particle {
-    position: Vec3, // not really needed because we have entity (TODO)
     velocity: Vec3,
     lifetime: f32,
     spin: f32,
@@ -91,13 +89,12 @@ fn update_particles(
     //compute_task_pool: Res<ComputeTaskPool>,
     mut particles: Query<(&mut Particle, Entity, &mut Transform)>,
 ) {
-    let dt = time.delta_seconds_f64() as f32;
+    let dt = time.delta_seconds();
     //particles.par_for_each_mut(&compute_task_pool, 32, move |(mut particle,entity)| {
     particles.for_each_mut(move |(mut particle, entity, mut transform)| {
         let velocity = particle.velocity * dt;
-        particle.position += velocity;
+        transform.translation += velocity;
         particle.lifetime -= dt;
-        transform.translation = particle.position;
 
         if particle.spin != 0.0f32 {
             rotate_by_angle(&mut transform, particle.spin * time.delta_seconds());
@@ -136,12 +133,12 @@ fn create_particles(
                 sprite: TextureAtlasSprite::new(effect.texture_index),
                 transform: Transform {
                     scale: effect.scale,
+                    translation: effect.pos,
                     ..Default::default()
                 },
                 ..Default::default()
             })
             .insert(Particle {
-                position: effect.pos,
                 velocity: make_random_velocity(effect.max_vel),
 
                 lifetime: random_range(effect.min_lifetime, effect.max_lifetime),
@@ -205,7 +202,6 @@ struct PlayerHitComponent;
 #[derive(Component, Default)]
 struct PlayerComponent {
     pub thrust: f32,
-    // TODO: pub player_index: u8, // Or 1, for 2 players
     pub friction: f32,
     pub last_hyperspace_time: f64,
     pub snap_angle: Option<f32>,
@@ -269,7 +265,6 @@ impl GameManagerResource {
         }
         if self.lives < 1 {
             self.state = State::Over;
-            scene_controller.game_over();
         } else {
             scene_controller.respawn_player_later(FutureTime::from_now(time, 2.0f64));
         }
@@ -277,14 +272,6 @@ impl GameManagerResource {
 }
 
 impl SceneControllerResource {
-    fn game_over(&mut self) {
-        // todo: stop all sounds.
-
-        self.level = 0;
-
-        //show_game_over( true);
-        //show_instructions( true);
-    }
 
     // We need to respawn player "later", so there:
     //  1) aren't two players in one frame (dead and spawned)
@@ -440,9 +427,8 @@ impl SceneControllerResource {
         self.last_asteroid_killed_at = Some(FutureTime::from_now(time, 15.0f64))
     }
 
-    fn clear_bullets(&mut self) {
-        // TODO
-    }
+    fn clear_bullets(&mut self) {}     // TODO
+
     fn clear_aliens(&mut self) {}
 
     fn add_asteroids(
