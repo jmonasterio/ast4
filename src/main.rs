@@ -722,6 +722,7 @@ fn setup(
 ) {
     seed_rng(&time);
 
+    // Load audio assets.
     game_manager.audio_state = audio_helper::prepare_audio( &asset_server);
 
     // hot reloading of assets.
