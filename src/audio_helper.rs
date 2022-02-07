@@ -1,4 +1,5 @@
 // TODO: I think this should be my own audio plugin that wraps kira.
+use crate::GameManagerResource;
 use bevy::prelude::*;
 use bevy_kira_audio::{Audio, AudioChannel, AudioSource};
 use std::collections::HashMap;
@@ -34,6 +35,7 @@ impl std::fmt::Display for Tracks {
     }
 }
 
+#[derive(Default)]
 pub struct AudioState {
     audio_loaded: bool,
     //loop_handle: Handle<AudioSource>,
@@ -52,31 +54,42 @@ pub fn start_looped_sound(
     track: &Tracks,
     sound: &Sounds,
     audio: &Res<Audio>,
-    audio_state: &mut ResMut<AudioState>,
+    audio_state: &mut AudioState,
 ) {
     if !audio_state.audio_loaded {
         return;
     }
 
     // TODO: This seems so sketch. Do I have to clone handle, even if not going to use?
-    let handle = audio_state.sound_handles.get(sound).unwrap().clone();
-    let cas = audio_state.audio_tracks.get_mut(track).unwrap();
-    if !cas.loop_started {
-        audio.play_looped_in_channel(handle, &cas.channel);
-        cas.loop_started = true;
+    let maybe_sound = audio_state.sound_handles.get(sound);
+
+    match maybe_sound {
+        Some(sound) => {
+            let handle = sound.clone();
+            let cas = audio_state.audio_tracks.get_mut(track).unwrap();
+            if !cas.loop_started {
+                audio.play_looped_in_channel(handle, &cas.channel);
+                cas.loop_started = true;
+            }
+        }
+        None => {();}
     }
 }
 
-pub fn stop_looped_sound(track: &Tracks, audio: &Res<Audio>, audio_state: &ResMut<AudioState>) {
-    let cas = audio_state.audio_tracks.get(track).unwrap(); // Get first channel.
-    audio.stop_channel(&cas.channel);
+pub fn stop_looped_sound(track: &Tracks, audio: &Res<Audio>, audio_state: &AudioState) {
+    let maybe_cas = audio_state.audio_tracks.get(track); // Get first channel.
+//use main; //::{GameManagerResource};
+    match maybe_cas {
+        Some(cas) => { audio.stop_channel(&cas.channel); }
+        None => {();}
+    }
 }
 
 pub fn play_single_sound(
     track: &Tracks,
     sound: &Sounds,
     audio: &Res<Audio>,
-    audio_state: &ResMut<AudioState>,
+    audio_state: &AudioState,
 ) {
     if !audio_state.audio_loaded {
         return;
@@ -88,12 +101,13 @@ pub fn play_single_sound(
     );
 }
 
-pub fn prepare_audio(commands: &mut Commands, asset_server: &AssetServer) {
+pub fn prepare_audio( asset_server: &Res<AssetServer>) -> AudioState {
     let mut audio_state = AudioState {
         audio_loaded: false,
-        //loop_handle,
-        sound_handles: HashMap::new(),
+        //loop_handle,•        sound_handles: HashMap::new(),
         audio_tracks: HashMap::new(),
+
+        ..Default::default()
     };
 
     audio_state.audio_tracks.insert(
@@ -160,22 +174,25 @@ pub fn prepare_audio(commands: &mut Commands, asset_server: &AssetServer) {
         .sound_handles
         .insert(Sounds::Thrust, asset_server.load("sounds/thrust.wav"));
 
-    commands.insert_resource(audio_state);
+    return audio_state;
 }
 
 use bevy::asset::LoadState;
 
 // TODO: Seems stupid to check this every frame.
-pub fn check_audio_loading(mut audio_state: ResMut<AudioState>, asset_server: ResMut<AssetServer>) {
-    if !audio_state.audio_loaded {
+pub fn check_audio_loading_system(
+    mut game_manager: ResMut<GameManagerResource>, 
+    asset_server: ResMut<AssetServer>) 
+    {
+    if !game_manager.audio_state.audio_loaded {
         //|| LoadState::Loaded != asset_server.get_load_state(&audio_state.loop_handle)
-        if audio_state
+        if game_manager.audio_state
             .sound_handles
             .iter()
             .any(|(_, handle)| LoadState::Loaded != asset_server.get_load_state(&handle.clone()))
         {
             return;
         }
-        audio_state.audio_loaded = true;
+        game_manager.audio_state.audio_loaded = true;
     }
 }

@@ -14,9 +14,12 @@ use bevy_render::camera::{DepthCalculation, ScalingMode, WindowOrigin};
 
 mod audio_helper;
 
+// TODO: Final explosion of player sound is cutoff.
+// TODO: Let final shots after player death allow a free player?
 // TODO: Cooler asset loader: https://www.nikl.me/blog/2021/asset-handling-in-bevy-apps/#:~:text=Most%20games%20have%20some%20sort%20of%20loading%20screen,later%20states%20can%20use%20them%20through%20the%20ECS.
 // TODO: Inspector:  https://bevy-cheatbook.github.io/setup/bevy-tools.html
 // TODO: Investigate: MrGVSV/bevy_proto
+// TODO: Why can't I have a sprite_renderer component like Unity has?
 
 // Terminology differences from UNITY to BEVY:
 
@@ -239,8 +242,8 @@ impl Default for State {
     }
 }
 
-#[derive(Default, Clone)]
-struct GameManagerResource {
+#[derive(Default)]
+pub struct GameManagerResource {
     state: State,
     score: u32,
     lives: u32,
@@ -252,6 +255,7 @@ struct GameManagerResource {
     last_asteroid_killed_at: Option<FutureTime>,
     player_spawn_when: Option<FutureTime>,
     game_started_this_frame: bool,
+    audio_state: audio_helper::AudioState,
 }
 
 impl GameManagerResource {
@@ -268,9 +272,7 @@ impl GameManagerResource {
             self.respawn_player_later(FutureTime::from_now(time, 2.0f64));
         }
     }
-}
 
-impl GameManagerResource {
 
     // We need to respawn player "later", so there:
     //  1) aren't two players in one frame (dead and spawned)
@@ -402,7 +404,7 @@ impl GameManagerResource {
         textures_resource: Res<TexturesResource>,
         time: &Res<Time>,
     ) {
-        seed_rng(&time); // reseed again.
+        seed_rng(time); // reseed again.
         self.lives = 4;
         self.score = 0;
         self.state = State::Playing;
@@ -426,7 +428,7 @@ impl GameManagerResource {
         self.jaw_interval_seconds = 0.9f64;
         self.jaws_alternate = true;
         self.next_jaws_sound_time = Some(FutureTime::from_now(time, 1.0f64));
-        self.add_asteroids(2 + self.level, commands, textures_resource); // 3.0 + Mathf.Log( (float) Level)));
+        self.add_asteroids(1 + self.level, commands, textures_resource); // 3.0 + Mathf.Log( (float) Level)));
         self.last_asteroid_killed_at = Some(FutureTime::from_now(time, 15.0f64))
     }
 
@@ -574,7 +576,7 @@ struct FrameRateResource {
     fps_last: f64,
 }
 
-
+// TODO: Would it help if this were part of the GameManagerResource???
 #[derive(Default, Clone)]
 struct TexturesResource {
     texture_atlas_handle: Handle<TextureAtlas>,
@@ -650,7 +652,7 @@ fn main() {
             ..Default::default()
         })
         .add_startup_system(setup)
-        .add_system(audio_helper::check_audio_loading)
+        .add_system(audio_helper::check_audio_loading_system)
         .add_stage_after(
             CoreStage::Update,
             DELETE_CLEANUP_STAGE,
@@ -665,7 +667,7 @@ fn main() {
                 .with_system(player_system)
                 .with_system(wrapped_2d_system)
                 .with_system(velocity_system)
-                .with_system(scene_system)
+                .with_system(game_manager_system)
                 .with_system(score_system)
                 .with_system(lives_system)
                 .with_system(collision_system)
@@ -715,11 +717,12 @@ fn setup(
     asset_server: Res<AssetServer>,
     mut texture_atlases: ResMut<Assets<TextureAtlas>>,
     mut textures_resource: ResMut<TexturesResource>,
+    mut game_manager: ResMut<GameManagerResource>,
     time: Res<Time>,
 ) {
     seed_rng(&time);
 
-    audio_helper::prepare_audio(&mut commands, asset_server.as_ref());
+    game_manager.audio_state = audio_helper::prepare_audio( &asset_server);
 
     // hot reloading of assets.
     //asset_server.watch_for_changes().unwrap();
@@ -967,12 +970,11 @@ fn wrapped_2d_system(mut query: Query<(&Wrapped2dComponent, &mut Transform)>) {
 
 fn player_system(
     mut commands: Commands,
-    game_manager: Res<GameManagerResource>,
+    mut game_manager: ResMut<GameManagerResource>,
     keyboard_input: Res<Input<KeyCode>>,
     textures: Res<TexturesResource>,
     time: Res<Time>,
     audio: Res<Audio>,
-    mut audio_state: ResMut<audio_helper::AudioState>,
     mut query: Query<(
         &mut PlayerComponent,
         &mut Transform,
@@ -1009,7 +1011,7 @@ fn player_system(
             &audio_helper::Tracks::Thrust,
             &audio_helper::Sounds::Thrust,
             &audio,
-            &mut audio_state,
+            &mut game_manager.audio_state,
         );
 
         // Too much trouble to implement rigid body like in Unity, so wrote my own.
@@ -1026,7 +1028,7 @@ fn player_system(
     } else {
         velocity.apply_friction(player.friction);
 
-        audio_helper::stop_looped_sound(&audio_helper::Tracks::Thrust, &audio, &audio_state);
+        audio_helper::stop_looped_sound(&audio_helper::Tracks::Thrust, &audio, &game_manager.audio_state);
 
         /* TODO
         if (_exhaustParticleSystem.isPlaying)
@@ -1049,7 +1051,7 @@ fn player_system(
                 &shooter,
                 muzzle_transform,
                 audio,
-                &audio_state,
+                &game_manager.audio_state,
                 &time,
             );
         }
@@ -1114,7 +1116,7 @@ fn fire_bullet_from_player(
     shooter: &ShooterComponent,
     muzzle_transform: &GlobalTransform,
     audio: Res<Audio>,
-    audio_state: &ResMut<audio_helper::AudioState>,
+    audio_state: &audio_helper::AudioState,
     time: &Res<Time>,
 ) {
     audio_helper::play_single_sound(
@@ -1249,38 +1251,38 @@ fn frame_rate(
     }
 }
 
-// Reduce number of params :https://github.com/bevyengine/bevy/issues/3267
-#[derive(SystemParam)]
-struct MySystemParam<'w, 's> {
-    audio: Res<'w, Audio>,
-    audio_state: ResMut<'w, audio_helper::AudioState>,
-    textures_resource: Res<'w, TexturesResource>,
-    _query: Query<'w, 's, ()>,
-}
+// TODO: Reduce number of params :https://github.com/bevyengine/bevy/issues/3267
+//#[derive(SystemParam)]
+//struct MySystemParam<'w, 's> {
+//    audio: Res<'w, Audio>,
+//    textures_resource: Res<'w, TexturesResource>,
+//    _query: Query<'w, 's, ()>,
+//}
 
-fn scene_system(
+fn game_manager_system(
     commands: Commands,
     mut game_manager: ResMut<GameManagerResource>,
     keyboard_input: Res<Input<KeyCode>>,
     time: Res<Time>,
-    common: MySystemParam,
+    audio: Res<Audio>,
+    textures_resource: Res<TexturesResource>,
 ) {
     match game_manager.state {
         State::Playing => {
-            update_ambience_sound(&time, game_manager, &common.audio, &common.audio_state);
+            update_ambience_sound(&time, game_manager, &audio);
         }
         State::Over => {
             // TODO: Turn off jaws sounds.
             audio_helper::stop_looped_sound(
                 &audio_helper::Tracks::Ambience,
-                &common.audio,
-                &common.audio_state,
+                &audio,
+                &game_manager.audio_state,
             );
 
             if keyboard_input.pressed(KeyCode::Space) {
                 game_manager.start_game(
                     commands,
-                    common.textures_resource,
+                    textures_resource,
                     &time,
                 );
             }
@@ -1292,7 +1294,6 @@ fn scene_system(
         time: &Res<Time>,
         mut game_manager: ResMut<GameManagerResource>,
         audio: &Res<Audio>,
-        audio_state: &ResMut<audio_helper::AudioState>,
     ) {
         if game_manager
             .next_jaws_sound_time
@@ -1312,14 +1313,14 @@ fn scene_system(
                     &audio_helper::Tracks::Ambience,
                     &audio_helper::Sounds::Beat1,
                     audio,
-                    audio_state,
+                    &game_manager.audio_state,
                 );
             } else {
                 audio_helper::play_single_sound(
                     &audio_helper::Tracks::Ambience,
                     &audio_helper::Sounds::Beat2,
                     audio,
-                    audio_state,
+                    &game_manager.audio_state,
                 );
             }
             game_manager.jaws_alternate = !game_manager.jaws_alternate;
@@ -1495,8 +1496,7 @@ fn asteroid_collision_system(
     )>,
     mut game_manager: ResMut<GameManagerResource>,
     textures_resource: Res<TexturesResource>,
-    audio: Res<Audio>,
-    audio_state: ResMut<audio_helper::AudioState>,
+    audio: Res<Audio>
 ) {
     for ev in ev_collision.iter() {
         {
@@ -1513,7 +1513,7 @@ fn asteroid_collision_system(
                     &audio_helper::Tracks::Ambience,
                     &audio_helper::Sounds::BangLarge, // TBD: Write one?
                     &audio,
-                    &audio_state,
+                    &game_manager.audio_state,
                 );
 
                 match ast.size {
@@ -1573,7 +1573,6 @@ fn player_collision_system(
     textures_resource: Res<TexturesResource>,
     time: Res<Time>,
     audio: Res<Audio>,
-    mut audio_state: ResMut<audio_helper::AudioState>,
 ) {
     for ev in ev_collision.iter() {
         // This is pretty inefficient.
@@ -1584,7 +1583,7 @@ fn player_collision_system(
                 &audio_helper::Tracks::Ambience,
                 &audio_helper::Sounds::BangSmall, 
                 &audio,
-                &audio_state,
+                &game_manager.audio_state,
             );
 
             // Create an explosion for player.
