@@ -239,19 +239,24 @@ impl Default for State {
     }
 }
 
-// Combine with scene controller.
 #[derive(Default, Clone)]
 struct GameManagerResource {
     state: State,
     score: u32,
     lives: u32,
     next_free_life_score: u32,
+    level: u32,
+    next_jaws_sound_time: Option<FutureTime>,
+    jaw_interval_seconds: f64,
+    jaws_alternate: bool,
+    last_asteroid_killed_at: Option<FutureTime>,
+    player_spawn_when: Option<FutureTime>,
+    game_started_this_frame: bool,
 }
 
 impl GameManagerResource {
     fn player_killed(
         &mut self,
-        scene_controller: &mut ResMut<SceneControllerResource>,
         time: &Res<Time>,
     ) {
         if self.lives > 0 {
@@ -260,12 +265,12 @@ impl GameManagerResource {
         if self.lives < 1 {
             self.state = State::Over;
         } else {
-            scene_controller.respawn_player_later(FutureTime::from_now(time, 2.0f64));
+            self.respawn_player_later(FutureTime::from_now(time, 2.0f64));
         }
     }
 }
 
-impl SceneControllerResource {
+impl GameManagerResource {
 
     // We need to respawn player "later", so there:
     //  1) aren't two players in one frame (dead and spawned)
@@ -395,11 +400,15 @@ impl SceneControllerResource {
         &mut self,
         mut commands: Commands,
         textures_resource: Res<TexturesResource>,
-        mut game_manager: ResMut<GameManagerResource>,
         time: &Res<Time>,
     ) {
+        seed_rng(&time); // reseed again.
+        self.lives = 4;
+        self.score = 0;
+        self.state = State::Playing;
+
         self.level = 0;
-        game_manager.next_free_life_score = FREE_USER_AT;
+        self.next_free_life_score = FREE_USER_AT;
 
         self.game_started_this_frame = true;
 
@@ -432,8 +441,8 @@ impl SceneControllerResource {
         textures_resource: &Res<TexturesResource>,
     ) {
         for _ in 0..count - 1 {
-            let pos = SceneControllerResource::make_safe_asteroid_pos();
-            SceneControllerResource::add_asteroid_with_size_at(
+            let pos = GameManagerResource::make_safe_asteroid_pos(); // TODO: Combine with next method.
+            GameManagerResource::add_asteroid_with_size_at(
                 commands,
                 textures_resource,
                 &AsteroidSize::Large,
@@ -565,18 +574,6 @@ struct FrameRateResource {
     fps_last: f64,
 }
 
-// todo: not sure why this isn't part of gamestate.
-#[derive(Default, Clone)]
-struct SceneControllerResource {
-    level: u32,
-    next_jaws_sound_time: Option<FutureTime>,
-    jaw_interval_seconds: f64,
-    jaws_alternate: bool,
-    last_asteroid_killed_at: Option<FutureTime>,
-
-    player_spawn_when: Option<FutureTime>,
-    game_started_this_frame: bool,
-}
 
 #[derive(Default, Clone)]
 struct TexturesResource {
@@ -634,15 +631,9 @@ fn main() {
         .add_plugin(ShapePlugin)
         .add_event::<AsteroidCollisionEvent>()
         .add_event::<PlayerCollisionEvent>()
-        .insert_resource(SceneControllerResource {
-            ..Default::default()
-        })
         .insert_resource(GameManagerResource {
             state: State::Over,
             next_free_life_score: FREE_USER_AT,
-            ..Default::default()
-        })
-        .insert_resource(SceneControllerResource {
             level: 0,
             jaw_interval_seconds: 0.9f64,
             jaws_alternate: false,
@@ -687,10 +678,17 @@ fn main() {
                 //.with_run_criteria(IntoRunCriteria::into( if DEBUG  {bevy::ecs::schedule::ShouldRun::Yes} else { bevy::ecs::schedule::ShouldRun::No}) )
                 .with_system(debug_system),
         )
-        .add_system(frame_rate)
+        .add_system(frame_rate);
         // TODO: Only if windows.
-        //.add_system(bevy::input::system::exit_on_esc_system)
-        .run();
+
+        if built_info::CFG_OS == "windows"
+        {
+            new_app.add_system(bevy::input::system::exit_on_esc_system);
+        }
+
+
+
+        new_app.run();
 }
 
 pub fn new_camera_2d() -> OrthographicCameraBundle {
@@ -718,8 +716,6 @@ fn setup(
     mut texture_atlases: ResMut<Assets<TextureAtlas>>,
     mut textures_resource: ResMut<TexturesResource>,
     time: Res<Time>,
-    //scene_controller_resource: ResMut<SceneControllerResource>,
-    //game_manager: ResMut<GameManagerResource>,
 ) {
     seed_rng(&time);
 
@@ -1264,7 +1260,6 @@ struct MySystemParam<'w, 's> {
 
 fn scene_system(
     commands: Commands,
-    mut scene_controller: ResMut<SceneControllerResource>,
     mut game_manager: ResMut<GameManagerResource>,
     keyboard_input: Res<Input<KeyCode>>,
     time: Res<Time>,
@@ -1272,7 +1267,7 @@ fn scene_system(
 ) {
     match game_manager.state {
         State::Playing => {
-            update_ambience_sound(&time, scene_controller, &common.audio, &common.audio_state);
+            update_ambience_sound(&time, game_manager, &common.audio, &common.audio_state);
         }
         State::Over => {
             // TODO: Turn off jaws sounds.
@@ -1283,14 +1278,9 @@ fn scene_system(
             );
 
             if keyboard_input.pressed(KeyCode::Space) {
-                seed_rng(&time); // reseed again.
-                game_manager.lives = 4;
-                game_manager.score = 0;
-                game_manager.state = State::Playing;
-                scene_controller.start_game(
+                game_manager.start_game(
                     commands,
                     common.textures_resource,
-                    game_manager,
                     &time,
                 );
             }
@@ -1300,24 +1290,24 @@ fn scene_system(
     // TODO: Make impl method on the scene controller.
     fn update_ambience_sound(
         time: &Res<Time>,
-        mut scene_controller: ResMut<SceneControllerResource>,
+        mut game_manager: ResMut<GameManagerResource>,
         audio: &Res<Audio>,
         audio_state: &ResMut<audio_helper::AudioState>,
     ) {
-        if scene_controller
+        if game_manager
             .next_jaws_sound_time
             .unwrap()
             .is_expired(time)
         // if in level
         {
-            if scene_controller.jaw_interval_seconds > 0.1800f64 {
-                scene_controller.jaw_interval_seconds -= 0.005f64
+            if game_manager.jaw_interval_seconds > 0.1800f64 {
+                game_manager.jaw_interval_seconds -= 0.005f64
             }
-            scene_controller.next_jaws_sound_time = Some(FutureTime::from_now(
+            game_manager.next_jaws_sound_time = Some(FutureTime::from_now(
                 time,
-                scene_controller.jaw_interval_seconds,
+                game_manager.jaw_interval_seconds,
             ));
-            if scene_controller.jaws_alternate {
+            if game_manager.jaws_alternate {
                 audio_helper::play_single_sound(
                     &audio_helper::Tracks::Ambience,
                     &audio_helper::Sounds::Beat1,
@@ -1332,7 +1322,7 @@ fn scene_system(
                     audio_state,
                 );
             }
-            scene_controller.jaws_alternate = !scene_controller.jaws_alternate;
+            game_manager.jaws_alternate = !game_manager.jaws_alternate;
         }
     }
 }
@@ -1459,7 +1449,7 @@ fn replace_asteroid_with(
     size: AsteroidSize,
 ) {
     for _ in 0..count {
-        SceneControllerResource::add_asteroid_with_size_at(
+        GameManagerResource::add_asteroid_with_size_at(
             commands,
             textures_resource,
             &size,
@@ -1580,7 +1570,6 @@ fn player_collision_system(
     mut ev_collision: EventReader<PlayerCollisionEvent>,
     mut query: Query<(Entity, &mut DeleteCleanupComponent, &Transform)>,
     mut game_manager: ResMut<GameManagerResource>,
-    mut scene_controller: ResMut<SceneControllerResource>,
     textures_resource: Res<TexturesResource>,
     time: Res<Time>,
     audio: Res<Audio>,
@@ -1616,7 +1605,7 @@ fn player_collision_system(
             );
 
             // Delete lifes
-            game_manager.player_killed(&mut scene_controller, &time);
+            game_manager.player_killed(&time);
         }
     }
 }
@@ -1643,14 +1632,14 @@ fn delete_cleanup_system(
 fn clear_at_game_start_system(
     mut commands: Commands,
     query: Query<(Entity, &AsteroidComponent)>,
-    mut scene_controller: ResMut<SceneControllerResource>,
+    mut game_manager: ResMut<GameManagerResource>,
 
 ) {
-    if scene_controller.game_started_this_frame {
+    if game_manager.game_started_this_frame {
         for ( ent, _) in query.iter()  {
             commands.entity(ent).despawn_recursive();
         }
-        scene_controller.game_started_this_frame = false;
+        game_manager.game_started_this_frame = false;
     } 
 
     // todo: clear bullets and aliens?
@@ -1725,8 +1714,7 @@ fn debug_system(
 // TODO: Maybe a little delay here?
 fn level_system(
     mut commands: Commands,
-    mut scene_controller_resource: ResMut<SceneControllerResource>,
-    game_manager: Res<GameManagerResource>,
+    mut game_manager: ResMut<GameManagerResource>,
     time: Res<Time>,
     textures_resource: Res<TexturesResource>,
     query: Query<&AsteroidComponent>,
@@ -1738,19 +1726,20 @@ fn level_system(
         return;
     }
 
-    scene_controller_resource.start_level(&mut commands, &textures_resource, &time);
+    game_manager.start_level(&mut commands, &textures_resource, &time);
 }
 
+// TODO: Should be method on game manager
 fn player_spawn_system(
     mut commands: Commands,
     textures_resource: Res<TexturesResource>,
-    mut scene_controller_resource: ResMut<SceneControllerResource>,
+    mut game_manager: ResMut<GameManagerResource>,
     time: Res<Time>,
 ) {
-    if let Some(when) = scene_controller_resource.player_spawn_when {
+    if let Some(when) = game_manager.player_spawn_when {
         if when.is_expired(&time) {
-            scene_controller_resource.player_spawn_when = None;
-            scene_controller_resource.respawn_player(&mut commands, &textures_resource);
+            game_manager.player_spawn_when = None;
+            game_manager.respawn_player(&mut commands, &textures_resource);
         }
     }
 }
