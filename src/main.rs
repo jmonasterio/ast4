@@ -443,7 +443,7 @@ impl GameManagerResource {
         textures_resource: &Res<TexturesResource>,
     ) {
         for _ in 0..count - 1 {
-            let pos = GameManagerResource::make_safe_asteroid_pos(); // TODO: Combine with next method.
+            let pos = GameManagerResource::make_safe_asteroid_pos(); 
             GameManagerResource::add_asteroid_with_size_at(
                 commands,
                 textures_resource,

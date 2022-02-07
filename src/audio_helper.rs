@@ -63,26 +63,19 @@ pub fn start_looped_sound(
     // TODO: This seems so sketch. Do I have to clone handle, even if not going to use?
     let maybe_sound = audio_state.sound_handles.get(sound);
 
-    match maybe_sound {
-        Some(sound) => {
-            let handle = sound.clone();
-            let cas = audio_state.audio_tracks.get_mut(track).unwrap();
-            if !cas.loop_started {
-                audio.play_looped_in_channel(handle, &cas.channel);
-                cas.loop_started = true;
-            }
+    if let Some(sound) = maybe_sound {
+        let handle = sound.clone();
+        let cas = audio_state.audio_tracks.get_mut(track).unwrap();
+        if !cas.loop_started {
+            audio.play_looped_in_channel(handle, &cas.channel);
+            cas.loop_started = true;
         }
-        None => {();}
     }
 }
 
 pub fn stop_looped_sound(track: &Tracks, audio: &Res<Audio>, audio_state: &AudioState) {
     let maybe_cas = audio_state.audio_tracks.get(track); // Get first channel.
-//use main; //::{GameManagerResource};
-    match maybe_cas {
-        Some(cas) => { audio.stop_channel(&cas.channel); }
-        None => {();}
-    }
+    if let Some(cas) = maybe_cas { audio.stop_channel(&cas.channel); }
 }
 
 pub fn play_single_sound(
@@ -174,7 +167,7 @@ pub fn prepare_audio( asset_server: &Res<AssetServer>) -> AudioState {
         .sound_handles
         .insert(Sounds::Thrust, asset_server.load("sounds/thrust.wav"));
 
-    return audio_state;
+    audio_state
 }
 
 use bevy::asset::LoadState;
