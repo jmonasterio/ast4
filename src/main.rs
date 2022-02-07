@@ -5,7 +5,7 @@ use std::ops::Mul;
 use bevy::{
     core::FixedTimestep,
     //diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin}, 
-    ecs::system::SystemParam,
+    //ecs::system::SystemParam,
     prelude::*,
 };
 use bevy_kira_audio::{Audio, AudioPlugin};
@@ -968,6 +968,7 @@ fn wrapped_2d_system(mut query: Query<(&Wrapped2dComponent, &mut Transform)>) {
     }
 }
 
+// TODO: maybe split into player_move and player_shoot system.s
 fn player_system(
     mut commands: Commands,
     mut game_manager: ResMut<GameManagerResource>,
