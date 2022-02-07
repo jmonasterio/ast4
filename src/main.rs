@@ -4,18 +4,14 @@ use std::ops::Mul;
 
 use bevy::{
     core::FixedTimestep,
-    diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin}, //sprite::collide_aabb::{collide, Collision},
+    //diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin}, 
     ecs::system::SystemParam,
-    //    math::Vec3,
     prelude::*,
 };
-//use bevy::tasks::ComputeTaskPool;
 use bevy_kira_audio::{Audio, AudioPlugin};
 use bevy_prototype_lyon::prelude::*;
 use bevy_render::camera::{DepthCalculation, ScalingMode, WindowOrigin};
 
-//use bevy_window::*;
-//use bevy_winit::*;
 mod audio_helper;
 
 // TODO: Cooler asset loader: https://www.nikl.me/blog/2021/asset-handling-in-bevy-apps/#:~:text=Most%20games%20have%20some%20sort%20of%20loading%20screen,later%20states%20can%20use%20them%20through%20the%20ECS.
@@ -47,13 +43,11 @@ struct FutureTime {
 }
 
 struct AsteroidCollisionEvent {
-    asteroid: Entity,
-    hit_by: Entity,
+    asteroid: Entity
 }
 
 struct PlayerCollisionEvent {
     player: Entity,
-    hit_by: Entity,
 }
 
 impl FutureTime {
@@ -97,10 +91,10 @@ fn update_particles(
         particle.lifetime -= dt;
 
         if particle.spin != 0.0f32 {
-            rotate_by_angle(&mut transform, particle.spin * time.delta_seconds());
+            rotate_by_angle(&mut transform, particle.spin * dt);
         }
         if particle.fade != 0.0f32 {
-            transform.scale *= (1.0f32 - particle.fade * time.delta_seconds());
+            transform.scale *= 1.0f32 - particle.fade * dt;
         }
 
         if particle.lifetime < 0.0f32 {
@@ -579,7 +573,6 @@ struct SceneControllerResource {
     jaw_interval_seconds: f64,
     jaws_alternate: bool,
     last_asteroid_killed_at: Option<FutureTime>,
-    next_free_life_score: u32,
 
     player_spawn_when: Option<FutureTime>,
     game_started_this_frame: bool,
@@ -646,6 +639,7 @@ fn main() {
         })
         .insert_resource(GameManagerResource {
             state: State::Over,
+            next_free_life_score: FREE_USER_AT,
             ..Default::default()
         })
         .insert_resource(SceneControllerResource {
@@ -653,7 +647,6 @@ fn main() {
             jaw_interval_seconds: 0.9f64,
             jaws_alternate: false,
             next_jaws_sound_time: None,
-            next_free_life_score: FREE_USER_AT,
             ..Default::default()
         })
         .insert_resource(FrameRateResource {
@@ -1431,7 +1424,6 @@ fn collision_system(
                 commands.entity(*bul_ent).despawn_recursive();
                 ev_asteroid_collision.send(AsteroidCollisionEvent {
                     asteroid: ast_ent,
-                    hit_by: *bul_ent,
                 });
                 break;
             }
@@ -1442,7 +1434,7 @@ fn collision_system(
         let near_player_area = make_area_around(play_trans, 100.0f32); // TOD: hardcode
         for entry in asteroid_qt.query(near_player_area) {
             let idx = entry.value_ref();
-            let (ast_ent, ast_comp, ast_trans) = asteroid_array[*idx];
+            let (_, ast_comp, ast_trans) = asteroid_array[*idx];
 
             // We really want to see whether the hit points of the ship is inside
             //  the radius of the asteroid. Ignore shape, of asteroid -- assume circle
@@ -1451,7 +1443,6 @@ fn collision_system(
                 if d < ast_comp.hit_radius {
                     ev_player_collision.send(PlayerCollisionEvent {
                         player: *player_ent,
-                        hit_by: ast_ent,
                     });
                     break;
                 }
@@ -1480,7 +1471,7 @@ fn replace_asteroid_with(
 }
 
 fn spawn_asteroid_or_alien_explosion(
-    mut commands: &mut Commands,
+    commands: &mut Commands,
     textures_resource: &Res<TexturesResource>,
     trans: &Transform,
 ) {
@@ -1592,11 +1583,20 @@ fn player_collision_system(
     mut scene_controller: ResMut<SceneControllerResource>,
     textures_resource: Res<TexturesResource>,
     time: Res<Time>,
+    audio: Res<Audio>,
+    mut audio_state: ResMut<audio_helper::AudioState>,
 ) {
     for ev in ev_collision.iter() {
         // This is pretty inefficient.
         if let Ok((_, mut dcc, trans)) = query.get_mut(ev.player) {
             dcc.delete_after_frame = true;
+
+            audio_helper::play_single_sound(
+                &audio_helper::Tracks::Ambience,
+                &audio_helper::Sounds::BangSmall, 
+                &audio,
+                &audio_state,
+            );
 
             // Create an explosion for player.
             create_particles(
@@ -1659,10 +1659,10 @@ fn clear_at_game_start_system(
 fn debug_system(
     mut commands: Commands,
     query: Query<(Entity, &DebugComponent)>,
-    bullet_query: Query<(Entity, &BulletComponent, &Transform)>, // Todo, ColliderComponent in each bullet (etc), would contain info about collision size.
-    player_query: Query<(Entity, &PlayerComponent, &Transform)>,
+    //bullet_query: Query<(Entity, &BulletComponent, &Transform)>, // Todo, ColliderComponent in each bullet (etc), would contain info about collision size.
+    //player_query: Query<(Entity, &PlayerComponent, &Transform)>,
     asteroid_query: Query<(Entity, &AsteroidComponent, &Transform)>,
-    alient_query: Query<(Entity, &AlienComponent, &Transform)>,
+    //alien_query: Query<(Entity, &AlienComponent, &Transform)>,
     hit_points: Query<(Entity, &PlayerHitComponent, &GlobalTransform)>,
 ) {
     if !DEBUG {
@@ -1677,7 +1677,7 @@ fn debug_system(
     let asteroid_array: Vec<(Entity, &AsteroidComponent, &Transform)> =
         asteroid_query.iter().collect();
 
-    for (ee, ast, tr) in asteroid_array {
+    for (_, ast, tr) in asteroid_array {
         // Shape test
         let shape = shapes::Circle {
             radius: ast.hit_radius,
@@ -1700,7 +1700,7 @@ fn debug_system(
     let hit_point_array: Vec<(Entity, &PlayerHitComponent, &GlobalTransform)> =
         hit_points.iter().collect();
 
-    for (ee, ast, tr) in hit_point_array {
+    for (_, _, tr) in hit_point_array {
         // Shape test
         let shape = shapes::Circle {
             radius: 2.0f32,
