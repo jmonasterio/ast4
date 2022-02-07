@@ -969,6 +969,8 @@ fn wrapped_2d_system(mut query: Query<(&Wrapped2dComponent, &mut Transform)>) {
 }
 
 // TODO: maybe split into player_move and player_shoot system.s
+// TODO: Maybe I wouldn't be sending so many params around, if I used
+//  events to, e.g. eventStartSound(), eventSpawn
 fn player_system(
     mut commands: Commands,
     mut game_manager: ResMut<GameManagerResource>,
@@ -989,7 +991,7 @@ fn player_system(
     if query.is_empty() || game_manager.state == State::Over {
         return; // No player.
     }
-    let (mut player, mut transform, mut velocity, shooter) = query.single_mut();
+    let (mut player, mut player_transform, mut velocity, shooter) = query.single_mut();
 
     let mut dir = 0.0f32;
     if keyboard_input.pressed(KeyCode::Left) {
@@ -998,7 +1000,7 @@ fn player_system(
     if keyboard_input.pressed(KeyCode::Right) {
         dir += -1.0f32;
     }
-    player.rotate_to_angle_with_snap(&mut transform, dir, &time);
+    player.rotate_to_angle_with_snap(&mut player_transform, dir, &time);
 
     let mut vert = 0.0f32;
 
@@ -1017,7 +1019,7 @@ fn player_system(
 
         // Too much trouble to implement rigid body like in Unity, so wrote my own.
         // Assume no friction while accelerating.
-        velocity.apply_thrust(player.thrust, &transform.rotation);
+        velocity.apply_thrust(player.thrust, &player_transform.rotation);
 
         /*
         if (_exhaustParticleSystem.isStopped)
@@ -1039,31 +1041,49 @@ fn player_system(
         */
     }
 
-    if keyboard_input.just_pressed(KeyCode::LControl)
-        || keyboard_input.just_pressed(KeyCode::RControl)
-    {
-        if bullet_query.iter().count() < shooter.max_bullets {
-            let (_, muzzle_transform) = muzzle_query.single();
+    if (keyboard_input.just_pressed(KeyCode::LControl)
+        || keyboard_input.just_pressed(KeyCode::RControl)) && bullet_query.iter().count() < shooter.max_bullets {
+        let (_, muzzle_transform) = muzzle_query.single();
 
-            fire_bullet_from_player(
-                textures,
-                transform.as_ref(),
-                &mut commands,
-                &shooter,
-                muzzle_transform,
-                audio,
-                &game_manager.audio_state,
-                &time,
-            );
-        }
-    }
+        audio_helper::play_single_sound(
+            &audio_helper::Tracks::Game,
+            &audio_helper::Sounds::Fire,
+            &audio,
+            &game_manager.audio_state,
+        );
+    
+        commands
+            .spawn_bundle(SpriteSheetBundle {
+                texture_atlas: textures.texture_atlas_handle.clone(), // TODO: is this really good?
+                sprite: TextureAtlasSprite::new(textures.bullet_index),
+                transform: Transform {
+                    scale: Vec3::splat(1.0),
+                    translation: muzzle_transform.translation,
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .insert(BulletComponent {
+                source: BulletSource::Player,
+            })
+            .insert(VelocityComponent {
+                v: calc_player_normalized_pointing_dir(&player_transform).mul(shooter.bullet_speed),
+                max_speed: 5000.0f32, // TODO: Speed should be a struct
+                spin: 0.0f32,
+            })
+            .insert(Visibility { is_visible: true })
+            .insert(Wrapped2dComponent {})
+            .insert(DeleteCleanupComponent {
+                delete_after_frame: false,
+                auto_destroy_enabled: true,
+                auto_destroy_when: FutureTime::from_now(&time, 1.2f64),
+            });
+            }
 
-    // TBD: make a constant.
-    if keyboard_input.pressed(KeyCode::Return) {
-        if time.seconds_since_startup() - player.last_hyperspace_time > 1.0f64 {
-            transform.translation = make_random_pos(); // Not safe on purpose
-            player.last_hyperspace_time = time.seconds_since_startup();
-        }
+    // TODO: make a constant.
+    if keyboard_input.pressed(KeyCode::Return) && time.seconds_since_startup() - player.last_hyperspace_time > 1.0f64 {
+        player_transform.translation = make_random_pos(); // Not safe on purpose
+        player.last_hyperspace_time = time.seconds_since_startup();
     }
 }
 
@@ -1084,7 +1104,7 @@ impl PlayerComponent {
 
             // In case we have to stop, this will be the snap angle.
             let nearest = round_to_nearest_multiple(
-                target_angle + horz * self.angle_increment, // tbd: this may be laggy.
+                target_angle + horz * self.angle_increment, // TODO: this may be laggy.
                 self.angle_increment,
             );
 
@@ -1109,51 +1129,6 @@ fn velocity_system(time: Res<Time>, mut query: Query<(&mut Transform, &VelocityC
     }
 }
 
-// TBD: If this were inside
-fn fire_bullet_from_player(
-    textures: Res<TexturesResource>,
-    player_transform: &Transform,
-    commands: &mut Commands,
-    shooter: &ShooterComponent,
-    muzzle_transform: &GlobalTransform,
-    audio: Res<Audio>,
-    audio_state: &audio_helper::AudioState,
-    time: &Res<Time>,
-) {
-    audio_helper::play_single_sound(
-        &audio_helper::Tracks::Game,
-        &audio_helper::Sounds::Fire,
-        &audio,
-        audio_state,
-    );
-
-    commands
-        .spawn_bundle(SpriteSheetBundle {
-            texture_atlas: textures.texture_atlas_handle.clone(), // TODO: is this really good?
-            sprite: TextureAtlasSprite::new(textures.bullet_index),
-            transform: Transform {
-                scale: Vec3::splat(1.0),
-                translation: muzzle_transform.translation,
-                ..Default::default()
-            },
-            ..Default::default()
-        })
-        .insert(BulletComponent {
-            source: BulletSource::Player,
-        })
-        .insert(VelocityComponent {
-            v: calc_player_normalized_pointing_dir(player_transform).mul(shooter.bullet_speed),
-            max_speed: 5000.0f32, // TBD: Speed should be a struct
-            spin: 0.0f32,
-        })
-        .insert(Visibility { is_visible: true })
-        .insert(Wrapped2dComponent {})
-        .insert(DeleteCleanupComponent {
-            delete_after_frame: false,
-            auto_destroy_enabled: true,
-            auto_destroy_when: FutureTime::from_now(time, 1.2f64),
-        });
-}
 
 fn calc_player_normalized_pointing_dir(p: &Transform) -> Vec3 {
     let (_, _, angle_radians) = p.rotation.to_euler(EulerRot::XYZ);
@@ -1512,7 +1487,7 @@ fn asteroid_collision_system(
 
                 audio_helper::play_single_sound(
                     &audio_helper::Tracks::Ambience,
-                    &audio_helper::Sounds::BangLarge, // TBD: Write one?
+                    &audio_helper::Sounds::BangLarge, // TODO: Write one?
                     &audio,
                     &game_manager.audio_state,
                 );
