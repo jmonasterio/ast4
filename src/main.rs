@@ -1443,7 +1443,7 @@ fn asteroid_collision_system(
 
                 audio_helper::play_single_sound(
                     &audio_helper::Tracks::Game,
-                    &audio_helper::Sounds::BangLarge, // TODO: Write one?
+                    &audio_helper::Sounds::BangLarge,
                     &audio,
                     &game_manager.audio_state,
                 );
@@ -1500,11 +1500,7 @@ fn asteroid_collision_system(
     }
 }
 
-// IDEAS: Prblem... we have double deletes.
-//  System to delete at end frame.
-//  Game manager tracks deletions for a specific frame, so you can avoid doing it twice.
 
-// TODO: Lifes,etc.
 fn player_collision_system(
     mut commands: Commands,
     mut ev_collision: EventReader<PlayerCollisionEvent>,
