@@ -587,7 +587,6 @@ struct TexturesResource {
 
 fn seed_rng(t: &Res<Time>) {
     let in_ms = t.seconds_since_startup();
-    println!("seed: {}", in_ms);
     fastrand::seed(in_ms as u64);
 }
 
@@ -976,7 +975,6 @@ fn player_system(
     bullet_query: Query<&BulletComponent>,
     muzzle_query: Query<(&MuzzleComponent, &GlobalTransform)>,
 ) {
-    // println!("Player");
     if query.is_empty() || game_manager.state == State::Over {
         return; // No player.
     }
@@ -1000,9 +998,7 @@ fn player_system(
             &mut game_manager.audio_state,
         );
 
-        println!("Start thrust sound");
     } else if keyboard_input.just_released(KeyCode::Up) {
-        println!("Stop thrust sound.");
         audio_helper::stop_looped_sound(
             &audio_helper::Tracks::Thrust,
             &audio,
