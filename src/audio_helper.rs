@@ -75,7 +75,9 @@ pub fn start_looped_sound(
 
 pub fn stop_looped_sound(track: &Tracks, audio: &Res<Audio>, audio_state: &AudioState) {
     let maybe_cas = audio_state.audio_tracks.get(track); // Get first channel.
-    if let Some(cas) = maybe_cas { audio.stop_channel(&cas.channel); }
+    if let Some(cas) = maybe_cas {
+        audio.stop_channel(&cas.channel);
+    }
 }
 
 pub fn play_single_sound(
@@ -94,7 +96,7 @@ pub fn play_single_sound(
     );
 }
 
-pub fn prepare_audio( asset_server: &Res<AssetServer>) -> AudioState {
+pub fn prepare_audio(asset_server: &Res<AssetServer>) -> AudioState {
     let mut audio_state = AudioState {
         audio_loaded: false,
         //loop_handle,•        sound_handles: HashMap::new(),
@@ -174,12 +176,13 @@ use bevy::asset::LoadState;
 
 // TODO: Seems stupid to check this every frame.
 pub fn check_audio_loading_system(
-    mut game_manager: ResMut<GameManagerResource>, 
-    asset_server: ResMut<AssetServer>) 
-    {
+    mut game_manager: ResMut<GameManagerResource>,
+    asset_server: ResMut<AssetServer>,
+) {
     if !game_manager.audio_state.audio_loaded {
         //|| LoadState::Loaded != asset_server.get_load_state(&audio_state.loop_handle)
-        if game_manager.audio_state
+        if game_manager
+            .audio_state
             .sound_handles
             .iter()
             .any(|(_, handle)| LoadState::Loaded != asset_server.get_load_state(&handle.clone()))

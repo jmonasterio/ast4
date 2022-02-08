@@ -4,7 +4,7 @@ use std::ops::Mul;
 
 use bevy::{
     core::FixedTimestep,
-    //diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin}, 
+    //diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     //ecs::system::SystemParam,
     prelude::*,
 };
@@ -46,7 +46,7 @@ struct FutureTime {
 }
 
 struct AsteroidCollisionEvent {
-    asteroid: Entity
+    asteroid: Entity,
 }
 
 struct PlayerCollisionEvent {
@@ -259,10 +259,7 @@ pub struct GameManagerResource {
 }
 
 impl GameManagerResource {
-    fn player_killed(
-        &mut self,
-        time: &Res<Time>,
-    ) {
+    fn player_killed(&mut self, time: &Res<Time>) {
         if self.lives > 0 {
             self.lives -= 1;
         }
@@ -272,7 +269,6 @@ impl GameManagerResource {
             self.respawn_player_later(FutureTime::from_now(time, 2.0f64));
         }
     }
-
 
     // We need to respawn player "later", so there:
     //  1) aren't two players in one frame (dead and spawned)
@@ -432,7 +428,7 @@ impl GameManagerResource {
         self.last_asteroid_killed_at = Some(FutureTime::from_now(time, 15.0f64))
     }
 
-    fn clear_bullets(&mut self) {}     // TODO
+    fn clear_bullets(&mut self) {} // TODO
 
     fn clear_aliens(&mut self) {}
 
@@ -443,7 +439,7 @@ impl GameManagerResource {
         textures_resource: &Res<TexturesResource>,
     ) {
         for _ in 0..count - 1 {
-            let pos = GameManagerResource::make_safe_asteroid_pos(); 
+            let pos = GameManagerResource::make_safe_asteroid_pos();
             GameManagerResource::add_asteroid_with_size_at(
                 commands,
                 textures_resource,
@@ -668,6 +664,7 @@ fn main() {
                 .with_system(wrapped_2d_system)
                 .with_system(velocity_system)
                 .with_system(game_manager_system)
+                .with_system(update_ambience_sound)
                 .with_system(score_system)
                 .with_system(lives_system)
                 .with_system(collision_system)
@@ -681,16 +678,13 @@ fn main() {
                 .with_system(debug_system),
         )
         .add_system(frame_rate);
-        // TODO: Only if windows.
+    // TODO: Only if windows.
 
-        if built_info::CFG_OS == "windows"
-        {
-            new_app.add_system(bevy::input::system::exit_on_esc_system);
-        }
+    if built_info::CFG_OS == "windows" {
+        new_app.add_system(bevy::input::system::exit_on_esc_system);
+    }
 
-
-
-        new_app.run();
+    new_app.run();
 }
 
 pub fn new_camera_2d() -> OrthographicCameraBundle {
@@ -723,7 +717,7 @@ fn setup(
     seed_rng(&time);
 
     // Load audio assets.
-    game_manager.audio_state = audio_helper::prepare_audio( &asset_server);
+    game_manager.audio_state = audio_helper::prepare_audio(&asset_server);
 
     // hot reloading of assets.
     //asset_server.watch_for_changes().unwrap();
@@ -944,9 +938,7 @@ fn setup(
         .insert(LivesComponent)
         .insert(Visibility { is_visible: true });
 
-        // Create an explosion for player.
-
-        
+    // Create an explosion for player.
 }
 
 fn wrapped_2d_system(mut query: Query<(&Wrapped2dComponent, &mut Transform)>) {
@@ -1032,7 +1024,11 @@ fn player_system(
     } else {
         velocity.apply_friction(player.friction);
 
-        audio_helper::stop_looped_sound(&audio_helper::Tracks::Thrust, &audio, &game_manager.audio_state);
+        audio_helper::stop_looped_sound(
+            &audio_helper::Tracks::Thrust,
+            &audio,
+            &game_manager.audio_state,
+        );
 
         /* TODO
         if (_exhaustParticleSystem.isPlaying)
@@ -1043,7 +1039,9 @@ fn player_system(
     }
 
     if (keyboard_input.just_pressed(KeyCode::LControl)
-        || keyboard_input.just_pressed(KeyCode::RControl)) && bullet_query.iter().count() < shooter.max_bullets {
+        || keyboard_input.just_pressed(KeyCode::RControl))
+        && bullet_query.iter().count() < shooter.max_bullets
+    {
         let (_, muzzle_transform) = muzzle_query.single();
 
         audio_helper::play_single_sound(
@@ -1052,7 +1050,7 @@ fn player_system(
             &audio,
             &game_manager.audio_state,
         );
-    
+
         commands
             .spawn_bundle(SpriteSheetBundle {
                 texture_atlas: textures.texture_atlas_handle.clone(), // TODO: is this really good?
@@ -1079,10 +1077,12 @@ fn player_system(
                 auto_destroy_enabled: true,
                 auto_destroy_when: FutureTime::from_now(&time, 1.2f64),
             });
-            }
+    }
 
     // TODO: make a constant.
-    if keyboard_input.pressed(KeyCode::Return) && time.seconds_since_startup() - player.last_hyperspace_time > 1.0f64 {
+    if keyboard_input.pressed(KeyCode::Return)
+        && time.seconds_since_startup() - player.last_hyperspace_time > 1.0f64
+    {
         player_transform.translation = make_random_pos(); // Not safe on purpose
         player.last_hyperspace_time = time.seconds_since_startup();
     }
@@ -1130,7 +1130,6 @@ fn velocity_system(time: Res<Time>, mut query: Query<(&mut Transform, &VelocityC
     }
 }
 
-
 fn calc_player_normalized_pointing_dir(p: &Transform) -> Vec3 {
     let (_, _, angle_radians) = p.rotation.to_euler(EulerRot::XYZ);
     Vec3::new(-f32::sin(angle_radians), f32::cos(angle_radians), 0f32)
@@ -1146,7 +1145,7 @@ fn make_random_pos() -> Vec3 {
 fn make_random_velocity(max_speed: f32) -> Vec3 {
     let x = random_sign(::fastrand::f32());
     let y = random_sign(::fastrand::f32());
-    let speed = random_range( max_speed/2.0f32, max_speed);
+    let speed = random_range(max_speed / 2.0f32, max_speed);
     speed * Vec3::new(x, y, 0f32)
 }
 
@@ -1169,7 +1168,7 @@ fn game_over_system(
             &textures_resource,
             &ParticleEffect {
                 count: (500.0f32 * time.delta_seconds()) as u16,
-                pos: Vec3::new(0.53f32* WIDTH, 0.6f32*HEIGHT, 0.0f32),
+                pos: Vec3::new(0.53f32 * WIDTH, 0.6f32 * HEIGHT, 0.0f32),
                 scale: bevy::prelude::Vec3::splat(0.5f32),
                 max_vel: 300.0f32,
                 min_lifetime: 1.5f32,
@@ -1179,7 +1178,6 @@ fn game_over_system(
                 fade: 0.80f32,
             },
         );
-
     }
 }
 
@@ -1241,67 +1239,46 @@ fn game_manager_system(
     mut game_manager: ResMut<GameManagerResource>,
     keyboard_input: Res<Input<KeyCode>>,
     time: Res<Time>,
-    audio: Res<Audio>,
     textures_resource: Res<TexturesResource>,
 ) {
-    match game_manager.state {
-        State::Playing => {
-            update_ambience_sound(&time, game_manager, &audio);
+    if game_manager.state == State::Over && keyboard_input.pressed(KeyCode::Space) {
+        game_manager.start_game(commands, textures_resource, &time);
+    }
+}
+
+// TODO: Make impl method on the scene controller.
+fn update_ambience_sound(
+    time: Res<Time>,
+    mut game_manager: ResMut<GameManagerResource>,
+    audio: Res<Audio>,
+) {
+    if game_manager.state == State::Playing
+        && game_manager.next_jaws_sound_time.unwrap().is_expired(&time)
+    // if in level
+    {
+        if game_manager.jaw_interval_seconds > 0.1800f64 {
+            game_manager.jaw_interval_seconds -= 0.005f64
         }
-        State::Over => {
-            // TODO: Turn off jaws sounds.
-            audio_helper::stop_looped_sound(
+        game_manager.next_jaws_sound_time = Some(FutureTime::from_now(
+            &time,
+            game_manager.jaw_interval_seconds,
+        ));
+        if game_manager.jaws_alternate {
+            audio_helper::play_single_sound(
                 &audio_helper::Tracks::Ambience,
+                &audio_helper::Sounds::Beat1,
                 &audio,
                 &game_manager.audio_state,
             );
-
-            if keyboard_input.pressed(KeyCode::Space) {
-                game_manager.start_game(
-                    commands,
-                    textures_resource,
-                    &time,
-                );
-            }
+        } else {
+            audio_helper::play_single_sound(
+                &audio_helper::Tracks::Ambience,
+                &audio_helper::Sounds::Beat2,
+                &audio,
+                &game_manager.audio_state,
+            );
         }
-    }
-
-    // TODO: Make impl method on the scene controller.
-    fn update_ambience_sound(
-        time: &Res<Time>,
-        mut game_manager: ResMut<GameManagerResource>,
-        audio: &Res<Audio>,
-    ) {
-        if game_manager
-            .next_jaws_sound_time
-            .unwrap()
-            .is_expired(time)
-        // if in level
-        {
-            if game_manager.jaw_interval_seconds > 0.1800f64 {
-                game_manager.jaw_interval_seconds -= 0.005f64
-            }
-            game_manager.next_jaws_sound_time = Some(FutureTime::from_now(
-                time,
-                game_manager.jaw_interval_seconds,
-            ));
-            if game_manager.jaws_alternate {
-                audio_helper::play_single_sound(
-                    &audio_helper::Tracks::Ambience,
-                    &audio_helper::Sounds::Beat1,
-                    audio,
-                    &game_manager.audio_state,
-                );
-            } else {
-                audio_helper::play_single_sound(
-                    &audio_helper::Tracks::Ambience,
-                    &audio_helper::Sounds::Beat2,
-                    audio,
-                    &game_manager.audio_state,
-                );
-            }
-            game_manager.jaws_alternate = !game_manager.jaws_alternate;
-        }
+        game_manager.jaws_alternate = !game_manager.jaws_alternate;
     }
 }
 
@@ -1390,9 +1367,7 @@ fn collision_system(
             let d = bul_trans.translation.distance(ast_trans.translation);
             if d < ast_comp.hit_radius {
                 commands.entity(*bul_ent).despawn_recursive();
-                ev_asteroid_collision.send(AsteroidCollisionEvent {
-                    asteroid: ast_ent,
-                });
+                ev_asteroid_collision.send(AsteroidCollisionEvent { asteroid: ast_ent });
                 break;
             }
         }
@@ -1473,7 +1448,7 @@ fn asteroid_collision_system(
     )>,
     mut game_manager: ResMut<GameManagerResource>,
     textures_resource: Res<TexturesResource>,
-    audio: Res<Audio>
+    audio: Res<Audio>,
 ) {
     for ev in ev_collision.iter() {
         {
@@ -1487,7 +1462,7 @@ fn asteroid_collision_system(
                 dcc.delete_after_frame = true;
 
                 audio_helper::play_single_sound(
-                    &audio_helper::Tracks::Ambience,
+                    &audio_helper::Tracks::Game,
                     &audio_helper::Sounds::BangLarge, // TODO: Write one?
                     &audio,
                     &game_manager.audio_state,
@@ -1557,8 +1532,8 @@ fn player_collision_system(
             dcc.delete_after_frame = true;
 
             audio_helper::play_single_sound(
-                &audio_helper::Tracks::Ambience,
-                &audio_helper::Sounds::BangSmall, 
+                &audio_helper::Tracks::Game,
+                &audio_helper::Sounds::BangSmall,
                 &audio,
                 &game_manager.audio_state,
             );
@@ -1609,14 +1584,13 @@ fn clear_at_game_start_system(
     mut commands: Commands,
     query: Query<(Entity, &AsteroidComponent)>,
     mut game_manager: ResMut<GameManagerResource>,
-
 ) {
     if game_manager.game_started_this_frame {
-        for ( ent, _) in query.iter()  {
+        for (ent, _) in query.iter() {
             commands.entity(ent).despawn_recursive();
         }
         game_manager.game_started_this_frame = false;
-    } 
+    }
 
     // todo: clear bullets and aliens?
 }
