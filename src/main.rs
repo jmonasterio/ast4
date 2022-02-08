@@ -652,8 +652,8 @@ fn main() {
                 .with_system(player_system)
                 .with_system(wrapped_2d_system)
                 .with_system(velocity_system)
-                .with_system(game_manager_system)
-                .with_system(update_ambience_sound)
+                .with_system(start_game_system)
+                .with_system(update_ambience_sound_system)
                 .with_system(score_system)
                 .with_system(lives_system)
                 .with_system(collision_system)
@@ -1231,7 +1231,7 @@ fn frame_rate(
 //    _query: Query<'w, 's, ()>,
 //}
 
-fn game_manager_system(
+fn start_game_system(
     commands: Commands,
     mut game_manager: ResMut<GameManagerResource>,
     keyboard_input: Res<Input<KeyCode>>,
@@ -1244,7 +1244,7 @@ fn game_manager_system(
 }
 
 // TODO: Make impl method on the scene controller.
-fn update_ambience_sound(
+fn update_ambience_sound_system(
     time: Res<Time>,
     mut game_manager: ResMut<GameManagerResource>,
     audio: Res<Audio>,
@@ -1391,24 +1391,7 @@ fn collision_system(
     }
 }
 
-fn replace_asteroid_with(
-    commands: &mut Commands,
-    textures_resource: &Res<TexturesResource>,
-    trans: &Transform,
-    count: u8,
-    size: AsteroidSize,
-) {
-    for _ in 0..count {
-        GameManagerResource::add_asteroid_with_size_at(
-            commands,
-            textures_resource,
-            &size,
-            trans.translation,
-        );
-    }
 
-    // TODO: Give momentum from the bullet.
-}
 
 fn spawn_asteroid_or_alien_explosion(
     commands: &mut Commands,
@@ -1465,32 +1448,40 @@ fn asteroid_collision_system(
                     &game_manager.audio_state,
                 );
 
+                let mut replace_size: Option<AsteroidSize> = None;
                 match ast.size {
                     AsteroidSize::Large => {
                         game_manager.score += 20;
-                        replace_asteroid_with(
-                            &mut commands,
-                            &textures_resource,
-                            trans,
-                            2,
-                            AsteroidSize::Medium,
-                        );
+
+                        replace_size = Some(AsteroidSize::Medium)
+                        
                     }
                     AsteroidSize::Medium => {
                         game_manager.score += 50;
-                        replace_asteroid_with(
-                            &mut commands,
-                            &textures_resource,
-                            trans,
-                            2,
-                            AsteroidSize::Small,
-                        );
+
+                        replace_size = Some(AsteroidSize::Small);
+
                     }
                     AsteroidSize::Small => {
                         game_manager.score += 100;
                     }
                 }
                 spawn_asteroid_or_alien_explosion(&mut commands, &textures_resource, trans);
+                
+                if let Some(size) = replace_size {
+                    
+                    // Replace with 2 smaller asteroids
+                    for _ in 0..2 {
+                        GameManagerResource::add_asteroid_with_size_at(
+                            &mut commands,
+                            &textures_resource,
+                            &size,
+                            trans.translation,
+                        );
+                    }
+                
+
+                }
             }
         }
 
@@ -1684,7 +1675,6 @@ fn level_system(
     game_manager.start_level(&mut commands, &textures_resource, &time);
 }
 
-// TODO: Should be method on game manager
 fn player_spawn_system(
     mut commands: Commands,
     textures_resource: Res<TexturesResource>,
