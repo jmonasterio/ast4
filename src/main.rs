@@ -4,7 +4,7 @@ use std::ops::Mul;
 
 use bevy::{
     core::FixedTimestep,
-    //diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
+    diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     //ecs::system::SystemParam,
     prelude::*,
 };
@@ -38,6 +38,8 @@ const WIDTH: f32 = 800.0f32;
 const HEIGHT: f32 = 600.0f32;
 const FREE_USER_AT: u32 = 10000;
 static DELETE_CLEANUP_STAGE: &str = "delete_cleanup_stage";
+const MIN_HYPERSPACE_INTERVAL: f64 = 1.0f64;
+
 
 #[derive(Default, Clone, Copy)]
 struct FutureTime {
@@ -263,6 +265,7 @@ impl GameManagerResource {
             self.lives -= 1;
         }
         if self.lives < 1 {
+
             self.state = State::Over;
         } else {
             self.respawn_player_later(FutureTime::from_now(time, 2.0f64));
@@ -617,9 +620,6 @@ fn main() {
             ..Default::default()
         })
         .add_plugins(DefaultPlugins)
-        //.add_plugin( RngPlugin)
-        //.add_plugin(LogDiagnosticsPlugin::default())  // TODO - put behind a flag
-        //.add_plugin(FrameTimeDiagnosticsPlugin::default()) // TODO - put behind a flag
         .add_plugin(AudioPlugin)
         .add_plugin(ShapePlugin)
         .add_event::<AsteroidCollisionEvent>()
@@ -632,12 +632,6 @@ fn main() {
             jaws_alternate: false,
             next_jaws_sound_time: None,
             ..Default::default()
-        })
-        .insert_resource(FrameRateResource {
-            delta_time: 0f64,
-            display_frame_rate: true,
-            debug_sinusoidal_frame_rate: false,
-            fps_last: 0f64,
         })
         .insert_resource(TexturesResource {
             ..Default::default()
@@ -668,15 +662,24 @@ fn main() {
                 .with_system(level_system)
                 .with_system(player_spawn_system)
                 .with_system(update_particles)
-                // TODO: Figure out.
-                //.with_run_criteria(IntoRunCriteria::into( if DEBUG  {bevy::ecs::schedule::ShouldRun::Yes} else { bevy::ecs::schedule::ShouldRun::No}) )
-                .with_system(debug_system),
-        )
-        .add_system(frame_rate);
-    // TODO: Only if windows.
+        );
 
     if built_info::CFG_OS == "windows" {
         new_app.add_system(bevy::input::system::exit_on_esc_system);
+    }
+
+    if DEBUG {
+        new_app
+        .add_plugin(LogDiagnosticsPlugin::default())
+        .add_plugin(FrameTimeDiagnosticsPlugin::default())
+        .add_system(debug_system)
+        .add_system(frame_rate)
+        .insert_resource(FrameRateResource {
+            delta_time: 0f64,
+            display_frame_rate: true,
+            debug_sinusoidal_frame_rate: false,
+            fps_last: 0f64,
+        });
     }
 
     new_app.run();
@@ -786,12 +789,14 @@ fn setup(
     let ttad = texture_atlases.add(texture_atlas);
     textures_resource.texture_atlas_handle = ttad;
 
+    let fps_label = if DEBUG {"FPS: "} else {""};
+
     commands
         .spawn_bundle(TextBundle {
             text: Text {
                 sections: vec![
                     TextSection {
-                        value: "FPS: ".to_string(),
+                        value: fps_label.to_string(),
                         style: TextStyle {
                             font: asset_server.load("fonts/FiraSans-Bold.ttf"),
                             font_size: 10.0,
@@ -1072,9 +1077,8 @@ fn player_system(
             });
     }
 
-    // TODO: make a constant.
     if keyboard_input.pressed(KeyCode::Return)
-        && time.seconds_since_startup() - player.last_hyperspace_time > 1.0f64
+        && time.seconds_since_startup() - player.last_hyperspace_time > MIN_HYPERSPACE_INTERVAL
     {
         player_transform.translation = make_random_pos(); // Not safe on purpose
         player.last_hyperspace_time = time.seconds_since_startup();
@@ -1546,6 +1550,14 @@ fn player_collision_system(
                     spin: 2.0f32,
                     fade: 0.95f32,
                 },
+            );
+
+            // STOP thrust sound when player_killed
+            // Need to do this better.
+            audio_helper::stop_looped_sound(
+                &audio_helper::Tracks::Thrust,
+                &audio,
+                &mut game_manager.audio_state,
             );
 
             // Delete lifes
