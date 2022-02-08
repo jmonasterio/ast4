@@ -61,9 +61,7 @@ pub fn start_looped_sound(
     }
 
     // TODO: This seems so sketch. Do I have to clone handle, even if not going to use?
-    let maybe_sound = audio_state.sound_handles.get(sound);
-
-    if let Some(sound) = maybe_sound {
+    if let Some(sound) = audio_state.sound_handles.get(sound) {
         let handle = sound.clone();
         let cas = audio_state.audio_tracks.get_mut(track).unwrap();
         if !cas.loop_started {
@@ -73,10 +71,12 @@ pub fn start_looped_sound(
     }
 }
 
-pub fn stop_looped_sound(track: &Tracks, audio: &Res<Audio>, audio_state: &AudioState) {
-    let maybe_cas = audio_state.audio_tracks.get(track); // Get first channel.
-    if let Some(cas) = maybe_cas {
-        audio.stop_channel(&cas.channel);
+pub fn stop_looped_sound(track: &Tracks, audio: &Res<Audio>, audio_state: &mut AudioState) {
+    if let Some(mut cas) = audio_state.audio_tracks.get_mut(track) {
+        if cas.loop_started {
+            audio.stop_channel(&cas.channel);
+            cas.loop_started = false;
+        }
     }
 }
 
@@ -142,10 +142,8 @@ pub fn prepare_audio(asset_server: &Res<AssetServer>) -> AudioState {
     audio_state
         .sound_handles
         .insert(Sounds::BangLarge, asset_server.load("sounds/bangLarge.wav"));
-    audio_state.sound_handles.insert(
-        Sounds::BangMedium,
-        asset_server.load("sounds/bangMedium.wav"),
-    );
+    audio_state.sound_handles
+        .insert(Sounds::BangMedium, asset_server.load("sounds/bangMedium.wav"));
     audio_state
         .sound_handles
         .insert(Sounds::BangSmall, asset_server.load("sounds/bangSmall.wav"));
@@ -161,10 +159,8 @@ pub fn prepare_audio(asset_server: &Res<AssetServer>) -> AudioState {
     audio_state
         .sound_handles
         .insert(Sounds::SaucerBig, asset_server.load("sounds/saucerBig.wav"));
-    audio_state.sound_handles.insert(
-        Sounds::SaucerSmall,
-        asset_server.load("sounds/saucerSmall.wav"),
-    );
+    audio_state.sound_handles
+        .insert(Sounds::SaucerSmall, asset_server.load("sounds/saucerSmall.wav"));
     audio_state
         .sound_handles
         .insert(Sounds::Thrust, asset_server.load("sounds/thrust.wav"));

@@ -14,7 +14,6 @@ use bevy_render::camera::{DepthCalculation, ScalingMode, WindowOrigin};
 
 mod audio_helper;
 
-// TODO: Final explosion of player sound is cutoff.
 // TODO: Let final shots after player death allow a free player?
 // TODO: Cooler asset loader: https://www.nikl.me/blog/2021/asset-handling-in-bevy-apps/#:~:text=Most%20games%20have%20some%20sort%20of%20loading%20screen,later%20states%20can%20use%20them%20through%20the%20ECS.
 // TODO: Inspector:  https://bevy-cheatbook.github.io/setup/bevy-tools.html
@@ -307,7 +306,7 @@ impl GameManagerResource {
                 ..Default::default()
             })
             .insert(PlayerComponent {
-                thrust: 2.0f32,
+                thrust: 100.0f32,
                 friction: 0.98f32,
                 last_hyperspace_time: 0f64,
                 snap_angle: None,
@@ -428,8 +427,6 @@ impl GameManagerResource {
         self.last_asteroid_killed_at = Some(FutureTime::from_now(time, 15.0f64))
     }
 
-    fn clear_bullets(&mut self) {} // TODO
-
     fn clear_aliens(&mut self) {}
 
     fn add_asteroids(
@@ -537,12 +534,11 @@ struct VelocityComponent {
 }
 
 impl VelocityComponent {
-    // TODO: Should time be part of thrust?
-    pub fn apply_thrust(&mut self, thrust: f32, direction: &Quat) {
+    pub fn apply_thrust(&mut self, thrust: f32, direction: &Quat, time: &Res<Time>) {
         let (_, _, angle_radians) = direction.to_euler(EulerRot::XYZ);
         let thrust_vector =
             thrust * Vec3::new(-f32::sin(angle_radians), f32::cos(angle_radians), 0f32);
-        self.v += thrust_vector; // * time.delta_seconds();
+        self.v += thrust_vector * time.delta_seconds();
         self.v = self.v.clamp_length_max(self.max_speed);
     }
 
@@ -995,13 +991,7 @@ fn player_system(
     }
     player.rotate_to_angle_with_snap(&mut player_transform, dir, &time);
 
-    let mut vert = 0.0f32;
-
-    if keyboard_input.pressed(KeyCode::Up) {
-        vert = 1.0f32;
-    }
-    // Maybe a thruster component? Or maybe Rotator+Thruster=PlayerMover component.
-    if vert > 0.0f32 {
+    if keyboard_input.just_pressed(KeyCode::Up) {
         // Can't stop looped sounds individually, so one per track.
         audio_helper::start_looped_sound(
             &audio_helper::Tracks::Thrust,
@@ -1010,9 +1000,22 @@ fn player_system(
             &mut game_manager.audio_state,
         );
 
+        println!("Start thrust sound");
+    } else if keyboard_input.just_released(KeyCode::Up) {
+        println!("Stop thrust sound.");
+        audio_helper::stop_looped_sound(
+            &audio_helper::Tracks::Thrust,
+            &audio,
+            &mut game_manager.audio_state,
+        );
+    }
+
+    // Maybe a thruster component? Or maybe Rotator+Thruster=PlayerMover component.
+    if keyboard_input.pressed(KeyCode::Up) {
+
         // Too much trouble to implement rigid body like in Unity, so wrote my own.
         // Assume no friction while accelerating.
-        velocity.apply_thrust(player.thrust, &player_transform.rotation);
+        velocity.apply_thrust(player.thrust, &player_transform.rotation, &time);
 
         /*
         if (_exhaustParticleSystem.isStopped)
@@ -1021,14 +1024,8 @@ fn player_system(
             _exhaustParticleSystem.Play();
         }
         */
-    } else {
+    } else  {
         velocity.apply_friction(player.friction);
-
-        audio_helper::stop_looped_sound(
-            &audio_helper::Tracks::Thrust,
-            &audio,
-            &game_manager.audio_state,
-        );
 
         /* TODO
         if (_exhaustParticleSystem.isPlaying)
