@@ -39,7 +39,7 @@ const HEIGHT: f32 = 600.0f32;
 const FREE_USER_AT: u32 = 10000;
 static DELETE_CLEANUP_STAGE: &str = "delete_cleanup_stage";
 const MIN_HYPERSPACE_INTERVAL: f64 = 1.0f64;
-
+const DELAY_BETWEEN_LEVELS: f64 = 1.0f64;
 
 #[derive(Default, Clone, Copy)]
 struct FutureTime {
@@ -53,6 +53,14 @@ struct AsteroidCollisionEvent {
 struct PlayerCollisionEvent {
     player: Entity,
 }
+
+type FutureWorkCallback = fn( commands: &mut Commands, game_manager: ResMut<GameManagerResource> );
+
+struct FutureWorkEvent {
+    when: FutureTime,
+    what: FutureWorkCallback,
+}
+
 
 impl FutureTime {
     fn from_now(t: &Time, sec: f64) -> FutureTime {
@@ -254,9 +262,13 @@ pub struct GameManagerResource {
     jaw_interval_seconds: f64,
     jaws_alternate: bool,
     last_asteroid_killed_at: Option<FutureTime>,
-    player_spawn_when: Option<FutureTime>,
     game_started_this_frame: bool,
     audio_state: audio_helper::AudioState,
+
+    // -- Do some work at a future time.
+    player_spawn_when: Option<FutureTime>,
+    level_start_when: Option<FutureTime,>
+
 }
 
 impl GameManagerResource {
@@ -624,6 +636,7 @@ fn main() {
         .add_plugin(ShapePlugin)
         .add_event::<AsteroidCollisionEvent>()
         .add_event::<PlayerCollisionEvent>()
+        .add_event::<FutureWorkEvent>()
         .insert_resource(GameManagerResource {
             state: State::Over,
             next_free_life_score: FREE_USER_AT,
@@ -1667,7 +1680,6 @@ fn debug_system(
 }
 
 // Start the next level when all asteroids gone.TexturesResource
-// TODO: Maybe a little delay here?
 fn level_system(
     mut commands: Commands,
     mut game_manager: ResMut<GameManagerResource>,
@@ -1682,7 +1694,19 @@ fn level_system(
         return;
     }
 
-    game_manager.start_level(&mut commands, &textures_resource, &time);
+    // Delay a bit before starting the next level
+    // TODO: This is cumbersome. Can we make it nicer?
+    match game_manager.level_start_when {
+        None => {
+            game_manager.level_start_when = Some(FutureTime::from_now(& time, DELAY_BETWEEN_LEVELS));
+        }
+        Some(when) => {
+            if when.is_expired(&time) { 
+                game_manager.start_level(&mut commands, &textures_resource, &time);
+                game_manager.level_start_when = None;
+            }
+        }
+    }
 }
 
 fn player_spawn_system(
