@@ -628,7 +628,6 @@ fn main() {
         .add_plugin(ShapePlugin)
         .add_event::<AsteroidCollisionEvent>()
         .add_event::<PlayerCollisionEvent>()
-        .add_event::<FutureWorkEvent>()
         .insert_resource(GameManagerResource {
             state: State::Over,
             next_free_life_score: FREE_USER_AT,
