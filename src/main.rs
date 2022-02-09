@@ -54,14 +54,6 @@ struct PlayerCollisionEvent {
     player: Entity,
 }
 
-type FutureWorkCallback = fn( commands: &mut Commands, game_manager: ResMut<GameManagerResource> );
-
-struct FutureWorkEvent {
-    when: FutureTime,
-    what: FutureWorkCallback,
-}
-
-
 impl FutureTime {
     fn from_now(t: &Time, sec: f64) -> FutureTime {
         assert!(sec >= 0f64);
