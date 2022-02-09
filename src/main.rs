@@ -14,7 +14,7 @@ use bevy_render::camera::{DepthCalculation, ScalingMode, WindowOrigin};
 
 mod audio_helper;
 
-// TODO: Let final shots after player death allow a free player?
+// TODO: Exhaust
 // TODO: Cooler asset loader: https://www.nikl.me/blog/2021/asset-handling-in-bevy-apps/#:~:text=Most%20games%20have%20some%20sort%20of%20loading%20screen,later%20states%20can%20use%20them%20through%20the%20ECS.
 // TODO: Inspector:  https://bevy-cheatbook.github.io/setup/bevy-tools.html
 // TODO: Investigate: MrGVSV/bevy_proto
@@ -1187,6 +1187,7 @@ fn game_over_system(
 
 fn score_system(
     mut game_manager: ResMut<GameManagerResource>,
+    audio: Res<Audio>,
     mut query: Query<(&mut Visibility, &ScoreComponent, &mut Text)>,
 ) {
     let is_playing = game_manager.state == State::Playing;
@@ -1198,6 +1199,13 @@ fn score_system(
     if game_manager.score > game_manager.next_free_life_score {
         game_manager.next_free_life_score += FREE_USER_AT;
         game_manager.lives += 1;
+
+        audio_helper::play_single_sound(
+            &audio_helper::Tracks::Game,
+            &audio_helper::Sounds::ExtraShip,
+            &audio,
+            &game_manager.audio_state,
+        );
     }
 }
 
@@ -1250,7 +1258,6 @@ fn start_game_system(
     }
 }
 
-// TODO: Make impl method on the scene controller.
 fn update_ambience_sound_system(
     time: Res<Time>,
     mut game_manager: ResMut<GameManagerResource>,
