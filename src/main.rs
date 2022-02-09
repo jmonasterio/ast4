@@ -137,7 +137,7 @@ fn create_particles(
                 ..Default::default()
             })
             .insert(Particle {
-                velocity: make_random_velocity(effect.max_vel),
+                velocity: make_random_velocity(effect.max_vel/3f32, effect.max_vel),
 
                 lifetime: random_range(effect.min_lifetime, effect.max_lifetime),
                 spin: random_sign(random_range(effect.spin / 2.0f32, effect.spin)),
@@ -485,7 +485,7 @@ impl GameManagerResource {
             })
             .insert(Wrapped2dComponent)
             .insert(VelocityComponent {
-                v: make_random_velocity(200f32),
+                v: make_random_velocity(100f32, 200f32),
                 spin: 1.0f32,
                 max_speed: 200f32,
             })
@@ -1085,11 +1085,15 @@ fn player_system(
     }
 }
 
+
 pub fn round_to_nearest_multiple(f: f32, multiple: f32) -> f32 {
     f32::round(f / multiple) * multiple
 }
 
+
 impl PlayerComponent {
+
+    
     pub fn rotate_to_angle_with_snap(
         &mut self,
         transform: &mut Transform,
@@ -1129,6 +1133,10 @@ fn velocity_system(time: Res<Time>, mut query: Query<(&mut Transform, &VelocityC
 
 fn calc_player_normalized_pointing_dir(p: &Transform) -> Vec3 {
     let (_, _, angle_radians) = p.rotation.to_euler(EulerRot::XYZ);
+    radians_to_vec3( angle_radians)
+}
+
+fn radians_to_vec3( angle_radians: f32) -> Vec3 {
     Vec3::new(-f32::sin(angle_radians), f32::cos(angle_radians), 0f32)
 }
 
@@ -1138,12 +1146,11 @@ fn make_random_pos() -> Vec3 {
     Vec3::new(x * WIDTH, y * HEIGHT, 0f32)
 }
 
-// TODO: This makes some very slow speeds and need to fix that.
-fn make_random_velocity(max_speed: f32) -> Vec3 {
-    let x = random_sign(::fastrand::f32());
-    let y = random_sign(::fastrand::f32());
-    let speed = random_range(max_speed / 2.0f32, max_speed);
-    speed * Vec3::new(x, y, 0f32)
+fn make_random_velocity(min_speed: f32, max_speed: f32) -> Vec3 {
+    let angle_radians = random_range(0f32, 2f32 * std::f32::consts::PI);
+    let vector = radians_to_vec3( angle_radians);
+    let speed = random_range( min_speed, max_speed);
+    speed * vector
 }
 
 // Show or hide instructions based on game state.
