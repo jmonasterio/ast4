@@ -1449,10 +1449,11 @@ fn collision_system(
         if !alien_array.is_empty() {
             let (alien_ent, alien_comp, alien_trans) = alien_array[0];
 
+            // TODO: SImilar code in next for loop
             // So we're close. Let's calculate actual distance based on size.
             let d = bul_trans.translation.distance(alien_trans.translation);
             if d < alien_comp.hit_radius {
-                commands.entity(*bul_ent).despawn_recursive();
+                commands.entity(*bul_ent).despawn_recursive(); // TODO: DO after frame.
                 ev_alien_collision.send(AlienCollisionEvent { alien: alien_ent });
                 break;
             }
@@ -1468,13 +1469,25 @@ fn collision_system(
             // We really want to see whether the hit points of the ship is inside
             //  the radius of the asteroid. Ignore shape, of asteroid -- assume circle
             for (_, _, glob_trns) in &hitpoint_array {
-                let d = glob_trns.translation.distance(ast_trans.translation);
+                let d = glob_trns.translation.distance(ast_trans.translation); // TODO do after frame.
                 if d < ast_comp.hit_radius {
                     ev_player_collision.send(PlayerCollisionEvent {
                         player: *player_ent,
                     });
                     break;
                 }
+            }
+        }
+        if !alien_array.is_empty() {
+            let (alien_ent, alien_comp, alien_trans) = alien_array[0];
+
+            // So we're close. Let's calculate actual distance based on size.
+            let d = play_trans.translation.distance(alien_trans.translation);
+            if d < alien_comp.hit_radius {
+                ev_player_collision.send(PlayerCollisionEvent {
+                    player: *player_ent,
+                });
+                break;
             }
         }
     }
@@ -1516,7 +1529,7 @@ fn alien_collision_system(
             dcc.delete_after_frame = true;
 
             audio_helper::play_single_sound(
-                &audio_helper::Tracks::Saucers,
+                &audio_helper::Tracks::Game,
                 &audio_helper::Sounds::BangSmall,
                 &audio,
                 &game_manager.audio_state,
@@ -1540,6 +1553,7 @@ fn alien_collision_system(
             );
 
             // Stop alien sound
+            println!("Stop looped sound");
             audio_helper::stop_looped_sound(
                 &audio_helper::Tracks::Saucers,
                 &audio,
@@ -1856,6 +1870,8 @@ fn make_random_path() -> Path2D {
 }
 
 fn alien_update_system(
+    mut game_manager: ResMut<GameManagerResource>, // Seems like sound should attach to entity and be killed with it.
+    audio: Res<Audio>,
     mut aliens_query: Query<(
         &mut AlienComponent,
         &Transform,
@@ -1878,6 +1894,16 @@ fn alien_update_system(
         if alien.path_step >= alien.path.len()-1 {
             //If end of path, we're done.
             dcc.delete_after_frame = true;
+
+            // Stop alien sound
+            println!("Stop looped sound");
+            audio_helper::stop_looped_sound(
+                &audio_helper::Tracks::Saucers,
+                &audio,
+                &mut game_manager.audio_state,
+            );
+            return;
+            
         }
     } else {
         // Go towards
@@ -1916,7 +1942,7 @@ fn alien_spawn_system(
         match game_manager.last_asteroid_killed_at {
             None => {}
             Some(laka) => {
-                let diff = laka.since(&time);
+                let diff = time.seconds_since_startup() - laka.seconds_since_startup_to_auto_destroy;
 
                 // TODO: Magic numbers
                 if (diff > 8.0f64)
