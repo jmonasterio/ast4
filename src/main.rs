@@ -820,8 +820,8 @@ fn setup(
     textures_resource.asteroid_small_hit_radius = small_asteroid_rect.width() / 2.0f32;
 
     let alien_small_rect = bevy::sprite::Rect {
-        min: Vec2::new(47.0, 4.0),
-        max: Vec2::new(71.0, 24.0),
+        min: Vec2::new(6.0, 64.0),
+        max: Vec2::new(34.0, 79.0),
     };
     textures_resource.alien_small_index =
         TextureAtlas::add_texture(&mut texture_atlas, alien_small_rect);
