@@ -142,8 +142,10 @@ pub fn prepare_audio(asset_server: &Res<AssetServer>) -> AudioState {
     audio_state
         .sound_handles
         .insert(Sounds::BangLarge, asset_server.load("sounds/bangLarge.wav"));
-    audio_state.sound_handles
-        .insert(Sounds::BangMedium, asset_server.load("sounds/bangMedium.wav"));
+    audio_state.sound_handles.insert(
+        Sounds::BangMedium,
+        asset_server.load("sounds/bangMedium.wav"),
+    );
     audio_state
         .sound_handles
         .insert(Sounds::BangSmall, asset_server.load("sounds/bangSmall.wav"));
@@ -159,8 +161,10 @@ pub fn prepare_audio(asset_server: &Res<AssetServer>) -> AudioState {
     audio_state
         .sound_handles
         .insert(Sounds::SaucerBig, asset_server.load("sounds/saucerBig.wav"));
-    audio_state.sound_handles
-        .insert(Sounds::SaucerSmall, asset_server.load("sounds/saucerSmall.wav"));
+    audio_state.sound_handles.insert(
+        Sounds::SaucerSmall,
+        asset_server.load("sounds/saucerSmall.wav"),
+    );
     audio_state
         .sound_handles
         .insert(Sounds::Thrust, asset_server.load("sounds/thrust.wav"));

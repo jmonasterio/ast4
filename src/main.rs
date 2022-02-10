@@ -14,6 +14,8 @@ use bevy_render::camera::{DepthCalculation, ScalingMode, WindowOrigin};
 
 mod audio_helper;
 
+// TODO: I want prefabs of aliens, and players, and asteroids. I clone a prefab to instantiate instead of code.
+// See: https://github.com/bevyengine/bevy/issues/1515
 // TODO: Exhaust
 // TODO: Cooler asset loader: https://www.nikl.me/blog/2021/asset-handling-in-bevy-apps/#:~:text=Most%20games%20have%20some%20sort%20of%20loading%20screen,later%20states%20can%20use%20them%20through%20the%20ECS.
 // TODO: Inspector:  https://bevy-cheatbook.github.io/setup/bevy-tools.html
@@ -41,6 +43,8 @@ static DELETE_CLEANUP_STAGE: &str = "delete_cleanup_stage";
 const MIN_HYPERSPACE_INTERVAL: f64 = 1.0f64;
 const DELAY_BETWEEN_LEVELS: f64 = 1.0f64;
 
+type Path2D = Vec<Vec3>;
+
 #[derive(Default, Clone, Copy)]
 struct FutureTime {
     seconds_since_startup_to_auto_destroy: f64,
@@ -54,6 +58,10 @@ struct PlayerCollisionEvent {
     player: Entity,
 }
 
+struct AlienCollisionEvent {
+    alien: Entity,
+}
+
 impl FutureTime {
     fn from_now(t: &Time, sec: f64) -> FutureTime {
         assert!(sec >= 0f64);
@@ -63,6 +71,14 @@ impl FutureTime {
         FutureTime {
             seconds_since_startup_to_auto_destroy: future,
         }
+    }
+
+    fn now(t: &Time) -> FutureTime {
+        FutureTime::from_now(t, 0f64)
+    }
+
+    fn since(&self, t: &Time) -> f64 {
+        t.seconds_since_startup() - self.seconds_since_startup_to_auto_destroy
     }
 
     fn is_expired(&self, t: &Time) -> bool {
@@ -137,7 +153,7 @@ fn create_particles(
                 ..Default::default()
             })
             .insert(Particle {
-                velocity: make_random_velocity(effect.max_vel/3f32, effect.max_vel),
+                velocity: make_random_velocity(effect.max_vel / 3f32, effect.max_vel),
 
                 lifetime: random_range(effect.min_lifetime, effect.max_lifetime),
                 spin: random_sign(random_range(effect.spin / 2.0f32, effect.spin)),
@@ -159,6 +175,13 @@ fn random_range(min: f32, max: f32) -> f32 {
     let range = max - min;
     let adjustment = range * random;
     min + adjustment
+}
+
+fn random_range_u32(min: u32, max: u32) -> u32 {
+    ::fastrand::u32(std::ops::Range {
+        start: min,
+        end: max,
+    })
 }
 
 #[derive(Component)]
@@ -189,6 +212,9 @@ struct AsteroidComponent {
 #[derive(Component)]
 struct AlienComponent {
     size: AlienSize,
+    path: Path2D,
+    path_step: usize,
+    hit_radius: f32,
 }
 
 #[derive(Component)]
@@ -258,9 +284,9 @@ pub struct GameManagerResource {
     audio_state: audio_helper::AudioState,
 
     // -- Do some work at a future time.
+    // TODO: Maybe make these a map, so I can have N of them. Or an enum or something.
     player_spawn_when: Option<FutureTime>,
-    level_start_when: Option<FutureTime,>
-
+    level_start_when: Option<FutureTime>,
 }
 
 impl GameManagerResource {
@@ -269,11 +295,24 @@ impl GameManagerResource {
             self.lives -= 1;
         }
         if self.lives < 1 {
-
             self.state = State::Over;
         } else {
             self.respawn_player_later(FutureTime::from_now(time, 2.0f64));
         }
+    }
+
+    fn destroy_alien(
+        &mut self,
+        mut dcc: DeleteCleanupComponent,
+        mut commands: Commands,
+        textures_resource: Res<TexturesResource>,
+        trans: Transform,
+        explode: bool,
+    ) {
+        if explode {
+            spawn_asteroid_or_alien_explosion(&mut commands, &textures_resource, &trans);
+        }
+        dcc.delete_after_frame = true;
     }
 
     // We need to respawn player "later", so there:
@@ -431,7 +470,7 @@ impl GameManagerResource {
         self.jaws_alternate = true;
         self.next_jaws_sound_time = Some(FutureTime::from_now(time, 1.0f64));
         self.add_asteroids(1 + self.level, commands, textures_resource); // 3.0 + Mathf.Log( (float) Level)));
-        self.last_asteroid_killed_at = Some(FutureTime::from_now(time, 15.0f64))
+        self.last_asteroid_killed_at = Some(FutureTime::from_now(time, 15.0f64));
     }
 
     fn clear_aliens(&mut self) {}
@@ -586,10 +625,15 @@ struct TexturesResource {
     asteroid_small_index: usize,
     explosion_particle_index: usize,
     ship_particle_index: usize,
+    alien_small_index: usize,
+    alien_large_index: usize,
 
     asteroid_large_hit_radius: f32,
     asteroid_medium_hit_radius: f32,
     asteroid_small_hit_radius: f32,
+
+    alien_small_hit_radius: f32,
+    alien_large_hit_radius: f32,
 }
 
 fn seed_rng(t: &Res<Time>) {
@@ -628,6 +672,7 @@ fn main() {
         .add_plugin(ShapePlugin)
         .add_event::<AsteroidCollisionEvent>()
         .add_event::<PlayerCollisionEvent>()
+        .add_event::<AlienCollisionEvent>()
         .insert_resource(GameManagerResource {
             state: State::Over,
             next_free_life_score: FREE_USER_AT,
@@ -663,9 +708,12 @@ fn main() {
                 .with_system(collision_system)
                 .with_system(asteroid_collision_system)
                 .with_system(player_collision_system)
+                .with_system(alien_collision_system)
                 .with_system(level_system)
                 .with_system(player_spawn_system)
                 .with_system(update_particles)
+                .with_system(alien_spawn_system)
+                .with_system(alien_update_system),
         );
 
     if built_info::CFG_OS == "windows" {
@@ -674,16 +722,16 @@ fn main() {
 
     if DEBUG {
         new_app
-        .add_plugin(LogDiagnosticsPlugin::default())
-        .add_plugin(FrameTimeDiagnosticsPlugin::default())
-        .add_system(debug_system)
-        .add_system(frame_rate)
-        .insert_resource(FrameRateResource {
-            delta_time: 0f64,
-            display_frame_rate: true,
-            debug_sinusoidal_frame_rate: false,
-            fps_last: 0f64,
-        });
+            .add_plugin(LogDiagnosticsPlugin::default())
+            .add_plugin(FrameTimeDiagnosticsPlugin::default())
+            .add_system(debug_system)
+            .add_system(frame_rate)
+            .insert_resource(FrameRateResource {
+                delta_time: 0f64,
+                display_frame_rate: true,
+                debug_sinusoidal_frame_rate: false,
+                fps_last: 0f64,
+            });
     }
 
     new_app.run();
@@ -771,6 +819,22 @@ fn setup(
         TextureAtlas::add_texture(&mut texture_atlas, small_asteroid_rect);
     textures_resource.asteroid_small_hit_radius = small_asteroid_rect.width() / 2.0f32;
 
+    let alien_small_rect = bevy::sprite::Rect {
+        min: Vec2::new(47.0, 4.0),
+        max: Vec2::new(71.0, 24.0),
+    };
+    textures_resource.alien_small_index =
+        TextureAtlas::add_texture(&mut texture_atlas, alien_small_rect);
+    textures_resource.alien_small_hit_radius = large_asteroid_rect.width() / 2.0f32;
+
+    let alien_large_rect = bevy::sprite::Rect {
+        min: Vec2::new(6.0, 64.0),
+        max: Vec2::new(34.0, 79.0),
+    };
+    textures_resource.alien_large_index =
+        TextureAtlas::add_texture(&mut texture_atlas, alien_large_rect);
+    textures_resource.alien_large_hit_radius = large_asteroid_rect.width() / 2.0f32;
+
     textures_resource.explosion_particle_index = TextureAtlas::add_texture(
         &mut texture_atlas,
         bevy::sprite::Rect {
@@ -793,7 +857,7 @@ fn setup(
     let ttad = texture_atlases.add(texture_atlas);
     textures_resource.texture_atlas_handle = ttad;
 
-    let fps_label = if DEBUG {"FPS: "} else {""};
+    let fps_label = if DEBUG { "FPS: " } else { "" };
 
     commands
         .spawn_bundle(TextBundle {
@@ -1006,7 +1070,6 @@ fn player_system(
             &audio,
             &mut game_manager.audio_state,
         );
-
     } else if keyboard_input.just_released(KeyCode::Up) {
         audio_helper::stop_looped_sound(
             &audio_helper::Tracks::Thrust,
@@ -1017,7 +1080,6 @@ fn player_system(
 
     // Maybe a thruster component? Or maybe Rotator+Thruster=PlayerMover component.
     if keyboard_input.pressed(KeyCode::Up) {
-
         // Too much trouble to implement rigid body like in Unity, so wrote my own.
         // Assume no friction while accelerating.
         velocity.apply_thrust(player.thrust, &player_transform.rotation, &time);
@@ -1029,7 +1091,7 @@ fn player_system(
             _exhaustParticleSystem.Play();
         }
         */
-    } else  {
+    } else {
         velocity.apply_friction(player.friction);
 
         /* TODO
@@ -1089,15 +1151,11 @@ fn player_system(
     }
 }
 
-
 pub fn round_to_nearest_multiple(f: f32, multiple: f32) -> f32 {
     f32::round(f / multiple) * multiple
 }
 
-
 impl PlayerComponent {
-
-    
     pub fn rotate_to_angle_with_snap(
         &mut self,
         transform: &mut Transform,
@@ -1137,10 +1195,10 @@ fn velocity_system(time: Res<Time>, mut query: Query<(&mut Transform, &VelocityC
 
 fn calc_player_normalized_pointing_dir(p: &Transform) -> Vec3 {
     let (_, _, angle_radians) = p.rotation.to_euler(EulerRot::XYZ);
-    radians_to_vec3( angle_radians)
+    radians_to_vec3(angle_radians)
 }
 
-fn radians_to_vec3( angle_radians: f32) -> Vec3 {
+fn radians_to_vec3(angle_radians: f32) -> Vec3 {
     Vec3::new(-f32::sin(angle_radians), f32::cos(angle_radians), 0f32)
 }
 
@@ -1152,8 +1210,8 @@ fn make_random_pos() -> Vec3 {
 
 fn make_random_velocity(min_speed: f32, max_speed: f32) -> Vec3 {
     let angle_radians = random_range(0f32, 2f32 * std::f32::consts::PI);
-    let vector = radians_to_vec3( angle_radians);
-    let speed = random_range( min_speed, max_speed);
+    let vector = radians_to_vec3(angle_radians);
+    let speed = random_range(min_speed, max_speed);
     speed * vector
 }
 
@@ -1303,10 +1361,11 @@ fn collision_system(
     mut commands: Commands,
     mut ev_asteroid_collision: EventWriter<AsteroidCollisionEvent>, // TODO: Can I have two type params, like ASTERID?
     mut ev_player_collision: EventWriter<PlayerCollisionEvent>,
+    mut ev_alien_collision: EventWriter<AlienCollisionEvent>,
     bullet_query: Query<(Entity, &BulletComponent, &Transform)>, // Todo, ColliderComponent in each bullet (etc), would contain info about collision size.
     player_query: Query<(Entity, &PlayerComponent, &Transform)>,
     asteroid_query: Query<(Entity, &AsteroidComponent, &Transform)>,
-    //alient_query: Query<(Entity, &AlienComponent, &Transform)>,
+    alien_query: Query<(Entity, &AlienComponent, &Transform)>,
     hit_point_query: Query<(Entity, &PlayerHitComponent, &GlobalTransform)>,
 ) {
     // Detect:
@@ -1333,7 +1392,7 @@ fn collision_system(
     assert!(player_array.len() <= 1);
     let asteroid_array: Vec<(Entity, &AsteroidComponent, &Transform)> =
         asteroid_query.iter().collect();
-    //let _alien_array: Vec<(Entity, &AlienComponent, &Transform)> = alient_query.iter().collect();
+    let alien_array: Vec<(Entity, &AlienComponent, &Transform)> = alien_query.iter().collect();
     let hitpoint_array: Vec<(Entity, &PlayerHitComponent, &GlobalTransform)> =
         hit_point_query.iter().collect();
 
@@ -1386,6 +1445,18 @@ fn collision_system(
                 break;
             }
         }
+
+        if !alien_array.is_empty() {
+            let (alien_ent, alien_comp, alien_trans) = alien_array[0];
+
+            // So we're close. Let's calculate actual distance based on size.
+            let d = bul_trans.translation.distance(alien_trans.translation);
+            if d < alien_comp.hit_radius {
+                commands.entity(*bul_ent).despawn_recursive();
+                ev_alien_collision.send(AlienCollisionEvent { alien: alien_ent });
+                break;
+            }
+        }
     }
 
     for (player_ent, _, play_trans) in &player_array {
@@ -1409,8 +1480,6 @@ fn collision_system(
     }
 }
 
-
-
 fn spawn_asteroid_or_alien_explosion(
     commands: &mut Commands,
     textures_resource: &Res<TexturesResource>,
@@ -1433,6 +1502,54 @@ fn spawn_asteroid_or_alien_explosion(
     );
 }
 
+fn alien_collision_system(
+    mut commands: Commands,
+    mut ev_collision: EventReader<AlienCollisionEvent>,
+    mut query: Query<(Entity, &mut DeleteCleanupComponent, &Transform)>,
+    mut game_manager: ResMut<GameManagerResource>,
+    textures_resource: Res<TexturesResource>,
+    audio: Res<Audio>,
+) {
+    for ev in ev_collision.iter() {
+        // This is pretty inefficient.
+        if let Ok((_, mut dcc, trans)) = query.get_mut(ev.alien) {
+            dcc.delete_after_frame = true;
+
+            audio_helper::play_single_sound(
+                &audio_helper::Tracks::Saucers,
+                &audio_helper::Sounds::BangSmall,
+                &audio,
+                &game_manager.audio_state,
+            );
+
+            // Create an explosion for player.
+            create_particles(
+                &mut commands,
+                &textures_resource,
+                &ParticleEffect {
+                    count: 5,
+                    pos: trans.translation,
+                    scale: bevy::prelude::Vec3::splat(1.0f32),
+                    max_vel: 100.0f32,
+                    min_lifetime: 1.5f32,
+                    max_lifetime: 2.0f32,
+                    texture_index: textures_resource.ship_particle_index,
+                    spin: 2.0f32,
+                    fade: 0.95f32,
+                },
+            );
+
+            // Stop alien sound
+            audio_helper::stop_looped_sound(
+                &audio_helper::Tracks::Saucers,
+                &audio,
+                &mut game_manager.audio_state,
+            );
+
+        }
+    }
+}
+
 // TODO: Can this be part of the regular asteroid_system?
 // TODO: Split asteroid into smaller parts, or destroy it. Show explosions.
 fn asteroid_collision_system(
@@ -1447,6 +1564,7 @@ fn asteroid_collision_system(
     mut game_manager: ResMut<GameManagerResource>,
     textures_resource: Res<TexturesResource>,
     audio: Res<Audio>,
+    time: Res<Time>,
 ) {
     for ev in ev_collision.iter() {
         {
@@ -1472,22 +1590,20 @@ fn asteroid_collision_system(
                         game_manager.score += 20;
 
                         replace_size = Some(AsteroidSize::Medium)
-                        
                     }
                     AsteroidSize::Medium => {
                         game_manager.score += 50;
 
                         replace_size = Some(AsteroidSize::Small);
-
                     }
                     AsteroidSize::Small => {
                         game_manager.score += 100;
                     }
                 }
                 spawn_asteroid_or_alien_explosion(&mut commands, &textures_resource, trans);
-                
+                game_manager.last_asteroid_killed_at = Some(FutureTime::now(&time));
+
                 if let Some(size) = replace_size {
-                    
                     // Replace with 2 smaller asteroids
                     for _ in 0..2 {
                         GameManagerResource::add_asteroid_with_size_at(
@@ -1497,8 +1613,6 @@ fn asteroid_collision_system(
                             trans.translation,
                         );
                     }
-                
-
                 }
             }
         }
@@ -1517,7 +1631,6 @@ fn asteroid_collision_system(
         */
     }
 }
-
 
 fn player_collision_system(
     mut commands: Commands,
@@ -1689,10 +1802,10 @@ fn level_system(
     // TODO: This is cumbersome. Can we make it nicer?
     match game_manager.level_start_when {
         None => {
-            game_manager.level_start_when = Some(FutureTime::from_now(& time, DELAY_BETWEEN_LEVELS));
+            game_manager.level_start_when = Some(FutureTime::from_now(&time, DELAY_BETWEEN_LEVELS));
         }
         Some(when) => {
-            if when.is_expired(&time) { 
+            if when.is_expired(&time) {
                 game_manager.start_level(&mut commands, &textures_resource, &time);
                 game_manager.level_start_when = None;
             }
@@ -1710,6 +1823,178 @@ fn player_spawn_system(
         if when.is_expired(&time) {
             game_manager.player_spawn_when = None;
             game_manager.respawn_player(&mut commands, &textures_resource);
+        }
+    }
+}
+
+fn make_random_path() -> Path2D {
+    let mut path = vec![Vec3::new(
+        0f32,
+        random_range(HEIGHT * 0.2f32, HEIGHT * 0.8f32),
+        0f32,
+    ),
+    Vec3::new(
+        0.25f32 * WIDTH,
+        random_range(HEIGHT * 0.2f32, HEIGHT * 0.8f32),
+        0f32,
+    ),
+    Vec3::new(
+        0.75f32 * WIDTH,
+        random_range(HEIGHT * 0.2f32, HEIGHT * 0.8f32),
+        0f32,
+    ),
+    Vec3::new(
+        WIDTH,
+        random_range(HEIGHT * 0.2f32, HEIGHT * 0.8f32),
+        0f32,
+    )];
+
+    if random_range_u32(0, 2) == 0 {
+        path.reverse();
+    }
+    path
+}
+
+fn alien_update_system(
+    mut aliens_query: Query<(
+        &mut AlienComponent,
+        &Transform,
+        &mut VelocityComponent,
+        &mut DeleteCleanupComponent,
+    )>
+) {
+    if aliens_query.is_empty() {
+        return;
+    };
+
+    let (mut alien, trans, mut vel, mut dcc) = aliens_query.single_mut();
+
+    let target = alien.path[alien.path_step + 1];
+    let cur_pos = trans.translation;
+
+    if cur_pos.distance(target) <= 5f32 {
+        alien.path_step += 1;
+        println!("path_step: {}    path_len: {}", alien.path_step, alien.path.len());
+        if alien.path_step >= alien.path.len()-1 {
+            //If end of path, we're done.
+            dcc.delete_after_frame = true;
+        }
+    } else {
+        // Go towards
+        let dir = target - cur_pos;
+        vel.v = dir.normalize() * vel.max_speed;
+    }
+
+    //var hit = Physics2D.Raycast(transform.position, rigidBody.velocity, distance:10.0f, layerMask:9 /* Asteroid */);
+    //if (hit.collider != null)
+    //{
+    //    float distance = Vector2.Distance(hit.point, transform.position); //n + Vector2.Up From2D(rigidBody.velocity.normalized*transform.localScale.magnitude)); // Extra math to not hit self.
+    //    if (distance > 0 && distance < 4.0f)
+    //    {
+    //        print("distance: " + distance);
+    //        distance = 0;
+    //    }
+    //
+    //}
+
+    //if (_bullet == null)
+    //{
+    //    FireBullet();
+    //}
+}
+
+fn alien_spawn_system(
+    mut commands: Commands,
+    mut game_manager: ResMut<GameManagerResource>,
+    other_aliens_query: Query<&AlienComponent>,
+    asteroids_query: Query<&AsteroidComponent>,
+    time: Res<Time>,
+    audio: Res<Audio>,
+    textures_resource: Res<TexturesResource>,
+) {
+    if game_manager.state == State::Playing && other_aliens_query.iter().count() == 0 {
+        match game_manager.last_asteroid_killed_at {
+            None => {}
+            Some(laka) => {
+                let diff = laka.since(&time);
+
+                // TODO: Magic numbers
+                if (diff > 8.0f64)
+                    || asteroids_query.iter().count() < 5
+                        && random_range_u32(0, 1000) > (996 - game_manager.level * 2)
+                {
+                    let alien_size = if random_range_u32(0, 3) == 0 {
+                        AlienSize::Small
+                    } else {
+                        AlienSize::Large
+                    };
+
+                    let alien_hit_radius = if alien_size == AlienSize::Small {
+                        textures_resource.alien_small_hit_radius
+                    } else {
+                        textures_resource.alien_large_hit_radius
+                    };
+
+                    let alien_scale_factor = if alien_size == AlienSize::Small {
+                        0.6f32
+                    } else {
+                        1.0f32
+                    };
+
+                    let random_path = make_random_path();
+                    let start_pos = random_path[0];
+
+                    commands
+                        .spawn_bundle(SpriteSheetBundle {
+                            texture_atlas: textures_resource.texture_atlas_handle.clone(), // TODO: How to avoid clone
+                            sprite: TextureAtlasSprite::new(if alien_size == AlienSize::Small {
+                                textures_resource.alien_small_index
+                            } else {
+                                textures_resource.alien_large_index
+                            }),
+                            transform: Transform {
+                                scale: Vec3::splat(alien_scale_factor),
+                                translation: start_pos,
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        })
+                        .insert(AlienComponent {
+                            size: alien_size.clone(),
+                            path: random_path,
+                            path_step: 0,
+                            hit_radius: alien_hit_radius,
+                        })
+                        .insert(Wrapped2dComponent)
+                        .insert(VelocityComponent {
+                            v: Vec3::new(0f32, 0f32, 0f32),
+                            max_speed: 300.0f32,
+                            spin: 0.0f32,
+                        })
+                        .insert(ShooterComponent {
+                            max_bullets: 4,
+                            bullet_speed: 400.0f32,
+                        })
+                        .insert(DeleteCleanupComponent {
+                            delete_after_frame: false,
+                            auto_destroy_enabled: false,
+                            ..Default::default()
+                        })
+                        .id();
+
+                    // Wouldn't it be cool if the alien knew it was spawned and played its own sound.
+                    audio_helper::start_looped_sound(
+                        &audio_helper::Tracks::Saucers,
+                        &(if alien_size == AlienSize::Small {
+                            audio_helper::Sounds::SaucerSmall
+                        } else {
+                            audio_helper::Sounds::SaucerBig
+                        }),
+                        &audio,
+                        &mut game_manager.audio_state,
+                    );
+                }
+            }
         }
     }
 }
