@@ -3,7 +3,6 @@
 use std::ops::Mul;
 
 use bevy::{
-    core::FixedTimestep,
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     //ecs::system::SystemParam,
     prelude::*,
@@ -34,7 +33,6 @@ mod audio_helper;
 // Resource = Singleton
 
 const DEBUG: bool = false;
-const TIME_STEP: f32 = 1.0 / 60.0;
 const PROJECT: &str = "AST4!";
 const WIDTH: f32 = 800.0f32;
 const HEIGHT: f32 = 600.0f32;
@@ -133,6 +131,8 @@ struct ParticleEffect {
     texture_index: usize,
     spin: f32,
     fade: f32,
+    min_angle: f32,  // radians of arc to emit, like 0f32
+    max_angle: f32,  // radian of arco to emit, like 2f32 * std::f32::consts::PI
 }
 
 fn create_particles(
@@ -153,7 +153,7 @@ fn create_particles(
                 ..Default::default()
             })
             .insert(Particle {
-                velocity: make_random_velocity(effect.max_vel / 3f32, effect.max_vel),
+                velocity: make_random_velocity(effect.max_vel / 3f32, effect.max_vel, effect.min_angle, effect.max_angle),
 
                 lifetime: random_range(effect.min_lifetime, effect.max_lifetime),
                 spin: random_sign(random_range(effect.spin / 2.0f32, effect.spin)),
@@ -219,6 +219,10 @@ struct AlienComponent {
 
 #[derive(Component)]
 struct MuzzleComponent;
+
+#[derive(Component)]
+struct ThrusterComponent;
+
 
 #[derive(Component)]
 struct PlayerHitComponent;
@@ -322,6 +326,18 @@ impl GameManagerResource {
             .insert(MuzzleComponent {})
             .id();
 
+        let thruster_id = commands
+            .spawn()            
+            .insert(Transform {
+                translation: Vec3::new(0f32, -9.0f32, 0f32),
+                ..Default::default()
+            })
+            .insert(GlobalTransform {
+                ..Default::default()
+            })
+            .insert(ThrusterComponent {})
+            .id();
+
         let player_id = commands
             .spawn_bundle(SpriteSheetBundle {
                 texture_atlas: textures_resource.texture_atlas_handle.clone(), // TODO: How to avoid clone
@@ -358,8 +374,8 @@ impl GameManagerResource {
             })
             .id();
 
-        commands.entity(player_id).push_children(&[muzzle_id]);
-
+        commands.entity(player_id).push_children(&[muzzle_id, thruster_id]);
+        
         let hit_points: [Entity; 5] = [
             commands
                 .spawn()
@@ -514,7 +530,7 @@ impl GameManagerResource {
             })
             .insert(Wrapped2dComponent)
             .insert(VelocityComponent {
-                v: make_random_velocity(100f32, 200f32),
+                v: make_random_velocity(100f32, 200f32, 0f32, 2f32 * std::f32::consts::PI),
                 spin: 1.0f32,
                 max_speed: 200f32,
             })
@@ -681,7 +697,6 @@ fn main() {
         .add_system_to_stage(DELETE_CLEANUP_STAGE, clear_at_game_start_system)
         .add_system_set(
             SystemSet::new()
-                .with_run_criteria(FixedTimestep::step(TIME_STEP as f64))
                 .with_system(game_over_system)
                 .with_system(player_system)
                 .with_system(wrapped_2d_system)
@@ -1021,7 +1036,7 @@ fn player_system(
     mut commands: Commands,
     mut game_manager: ResMut<GameManagerResource>,
     keyboard_input: Res<Input<KeyCode>>,
-    textures: Res<TexturesResource>,
+    textures_resource: Res<TexturesResource>,
     time: Res<Time>,
     audio: Res<Audio>,
     mut query: Query<(
@@ -1032,6 +1047,7 @@ fn player_system(
     )>,
     bullet_query: Query<&BulletComponent>,
     muzzle_query: Query<(&MuzzleComponent, &GlobalTransform)>,
+    thruster_query: Query<(&ThrusterComponent, &GlobalTransform)>,
 ) {
     if query.is_empty() || game_manager.state == State::Over {
         return; // No player.
@@ -1069,6 +1085,30 @@ fn player_system(
         // Assume no friction while accelerating.
         velocity.apply_thrust(player.thrust, &player_transform.rotation, &time);
 
+        let (_, thruster_transform) = thruster_query.single();
+
+        let angle = vec3_to_radians( player_transform.rotation) - std::f32::consts::PI;
+
+        // Create thrust cone
+        create_particles(
+            &mut commands,
+            &textures_resource,
+            &ParticleEffect {
+                count: (100.0f32 * time.delta_seconds()) as u16,
+                pos: thruster_transform.translation,
+                scale: bevy::prelude::Vec3::splat(1.25f32),
+                max_vel: 100.0f32,
+                min_lifetime: 0.01f32,
+                max_lifetime: 0.1f32,
+                texture_index: textures_resource.explosion_particle_index,
+                spin: 0.0f32,
+                fade: 1.0f32,
+                min_angle: angle-1f32,
+                max_angle: angle+1f32,
+            },
+        );
+
+
         /*
         if (_exhaustParticleSystem.isStopped)
         {
@@ -1102,8 +1142,8 @@ fn player_system(
 
         commands
             .spawn_bundle(SpriteSheetBundle {
-                texture_atlas: textures.texture_atlas_handle.clone(), // TODO: is this really good?
-                sprite: TextureAtlasSprite::new(textures.bullet_index),
+                texture_atlas: textures_resource.texture_atlas_handle.clone(), // TODO: is this really good?
+                sprite: TextureAtlasSprite::new(textures_resource.bullet_index),
                 transform: Transform {
                     scale: Vec3::splat(1.0),
                     translation: muzzle_transform.translation,
@@ -1178,12 +1218,16 @@ fn velocity_system(time: Res<Time>, mut query: Query<(&mut Transform, &VelocityC
 }
 
 fn calc_player_normalized_pointing_dir(p: &Transform) -> Vec3 {
-    let (_, _, angle_radians) = p.rotation.to_euler(EulerRot::XYZ);
-    radians_to_vec3(angle_radians)
+    radians_to_vec3(vec3_to_radians(p.rotation))
 }
 
 fn radians_to_vec3(angle_radians: f32) -> Vec3 {
     Vec3::new(-f32::sin(angle_radians), f32::cos(angle_radians), 0f32)
+}
+
+fn vec3_to_radians( rot: Quat) -> f32 {
+    let (_, _, angle_radians) = rot.to_euler(EulerRot::XYZ);
+    angle_radians
 }
 
 fn make_random_pos() -> Vec3 {
@@ -1192,8 +1236,8 @@ fn make_random_pos() -> Vec3 {
     Vec3::new(x * WIDTH, y * HEIGHT, 0f32)
 }
 
-fn make_random_velocity(min_speed: f32, max_speed: f32) -> Vec3 {
-    let angle_radians = random_range(0f32, 2f32 * std::f32::consts::PI);
+fn make_random_velocity(min_speed: f32, max_speed: f32, min_angle: f32, max_angle: f32) -> Vec3 {
+    let angle_radians = random_range(min_angle, max_angle);
     let vector = radians_to_vec3(angle_radians);
     let speed = random_range(min_speed, max_speed);
     speed * vector
@@ -1226,6 +1270,8 @@ fn game_over_system(
                 texture_index: textures_resource.explosion_particle_index,
                 spin: 0.0f32,
                 fade: 0.80f32,
+                min_angle: 0f32,
+                max_angle: 2f32 * std::f32::consts::PI,
             },
         );
     }
@@ -1494,6 +1540,8 @@ fn spawn_asteroid_or_alien_explosion(
             texture_index: textures_resource.explosion_particle_index,
             spin: 0.0f32,
             fade: 0.8f32,
+            min_angle: 0f32,
+            max_angle: 2f32 * std::f32::consts::PI,
         },
     );
 }
@@ -1653,6 +1701,8 @@ fn player_collision_system(
                     texture_index: textures_resource.ship_particle_index,
                     spin: 2.0f32,
                     fade: 0.95f32,
+                    min_angle: 0f32,
+                    max_angle: 2f32 * std::f32::consts::PI,
                 },
             );
 
