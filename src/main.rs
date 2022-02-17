@@ -493,10 +493,14 @@ impl GameManagerResource {
             AsteroidSize::Small => textures_resource.asteroid_small_index,
         };
 
+        // Randomly flip the sprite so they are a little more different
+        let mut sprite_at_index = TextureAtlasSprite::new(index);
+        sprite_at_index.flip_x = fastrand::f32() > 0.5f32;
+
         commands
             .spawn_bundle(SpriteSheetBundle {
                 texture_atlas: textures_resource.texture_atlas_handle.clone(), // TODO: How to avoid clone
-                sprite: TextureAtlasSprite::new(index),
+                sprite: sprite_at_index,
                 transform: Transform {
                     scale: Vec3::splat(1.0f32),
                     translation: p,
