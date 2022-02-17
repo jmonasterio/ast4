@@ -239,11 +239,6 @@ struct ScoreComponent;
 #[derive(Component)]
 struct LivesComponent;
 
-enum BulletSource {
-    Player,
-    Alien,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Copy)]
 enum AsteroidSize {
     Large,
@@ -561,7 +556,6 @@ impl GameManagerResource {
 
 #[derive(Component)]
 struct BulletComponent {
-    source: BulletSource,
 }
 
 // TODO: will we really use this on the alien? Maybe max_bullets should just be on the shooter.
@@ -1127,7 +1121,6 @@ fn player_system(
                 ..Default::default()
             })
             .insert(BulletComponent {
-                source: BulletSource::Player,
             })
             .insert(VelocityComponent {
                 v: calc_player_normalized_pointing_dir(&player_transform).mul(shooter.bullet_speed),
@@ -1479,9 +1472,8 @@ fn collision_system(
             }
         }
         if !alien_array.is_empty() {
-            let (alien_ent, alien_comp, alien_trans) = alien_array[0];
+            let (_, alien_comp, alien_trans) = alien_array[0]; // TODO: There should only be one.
 
-            // So we're close. Let's calculate actual distance based on size.
             let d = play_trans.translation.distance(alien_trans.translation);
             if d < alien_comp.hit_radius {
                 ev_player_collision.send(PlayerCollisionEvent {
@@ -1522,6 +1514,7 @@ fn alien_collision_system(
     mut game_manager: ResMut<GameManagerResource>,
     textures_resource: Res<TexturesResource>,
     audio: Res<Audio>,
+    time: Res<Time>,
 ) {
     for ev in ev_collision.iter() {
         // This is pretty inefficient.
@@ -1535,22 +1528,7 @@ fn alien_collision_system(
                 &game_manager.audio_state,
             );
 
-            // Create an explosion for player.
-            create_particles(
-                &mut commands,
-                &textures_resource,
-                &ParticleEffect {
-                    count: 5,
-                    pos: trans.translation,
-                    scale: bevy::prelude::Vec3::splat(1.0f32),
-                    max_vel: 100.0f32,
-                    min_lifetime: 1.5f32,
-                    max_lifetime: 2.0f32,
-                    texture_index: textures_resource.ship_particle_index,
-                    spin: 2.0f32,
-                    fade: 0.95f32,
-                },
-            );
+            spawn_asteroid_or_alien_explosion( &mut commands, &textures_resource, &trans);
 
             // Stop alien sound
             println!("Stop looped sound");
@@ -1559,6 +1537,9 @@ fn alien_collision_system(
                 &audio,
                 &mut game_manager.audio_state,
             );
+
+            // Treat killing an alien, like killing an asteroid.
+            game_manager.last_asteroid_killed_at = Some(FutureTime::now(&time));
 
         }
     }
@@ -1885,6 +1866,13 @@ fn alien_update_system(
 
     let (mut alien, trans, mut vel, mut dcc) = aliens_query.single_mut();
 
+    if dcc.delete_after_frame {
+        assert!( false, "Did not expect this.");
+        return;
+    }
+
+    assert!( alien.path_step+1 < alien.path.len());
+
     let target = alien.path[alien.path_step + 1];
     let cur_pos = trans.translation;
 
@@ -1902,7 +1890,6 @@ fn alien_update_system(
                 &audio,
                 &mut game_manager.audio_state,
             );
-            return;
             
         }
     } else {
@@ -1942,11 +1929,20 @@ fn alien_spawn_system(
         match game_manager.last_asteroid_killed_at {
             None => {}
             Some(laka) => {
-                let diff = time.seconds_since_startup() - laka.seconds_since_startup_to_auto_destroy;
+                let diff = laka.since( &time); //.seconds_since_startup() - laka.seconds_since_startup_to_auto_destroy;
+
+                let mut ast_count = 0;
+                for ast in asteroids_query.iter() {
+                    match ast.size {
+                        AsteroidSize::Large => { ast_count +=4; }
+                        AsteroidSize::Medium => { ast_count +=2; }
+                        AsteroidSize::Small => { ast_count +=1; }
+                    }
+                }
 
                 // TODO: Magic numbers
                 if (diff > 8.0f64)
-                    || asteroids_query.iter().count() < 5
+                    || ast_count < 5
                         && random_range_u32(0, 1000) > (996 - game_manager.level * 2)
                 {
                     let alien_size = if random_range_u32(0, 3) == 0 {
