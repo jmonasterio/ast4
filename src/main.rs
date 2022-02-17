@@ -296,19 +296,6 @@ impl GameManagerResource {
         }
     }
 
-    fn destroy_alien(
-        &mut self,
-        mut dcc: DeleteCleanupComponent,
-        mut commands: Commands,
-        textures_resource: Res<TexturesResource>,
-        trans: Transform,
-        explode: bool,
-    ) {
-        if explode {
-            spawn_asteroid_or_alien_explosion(&mut commands, &textures_resource, &trans);
-        }
-        dcc.delete_after_frame = true;
-    }
 
     // We need to respawn player "later", so there:
     //  1) aren't two players in one frame (dead and spawned)
