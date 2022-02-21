@@ -40,6 +40,11 @@ const FREE_USER_AT: u32 = 10000;
 static DELETE_CLEANUP_STAGE: &str = "delete_cleanup_stage";
 const MIN_HYPERSPACE_INTERVAL: f64 = 1.0f64;
 const DELAY_BETWEEN_LEVELS: f64 = 1.0f64;
+const ALIEN_INTERVAL: f64 = 10.0f64;
+const MIN_ASTEROID_SPAWN_ALIEN: u16 = 5;
+const JAWS_SOUND_INTERVAL: f64 = 1.0f64;
+const MIN_ALIEN_INTERVAL: f64 = 1.0f64;
+const ALIEN_INTERVAL_DECREASE: f64 = 1.0f64;
 
 type Path2D = Vec<Vec3>;
 
@@ -278,7 +283,7 @@ pub struct GameManagerResource {
     next_jaws_sound_time: Option<FutureTime>,
     jaw_interval_seconds: f64,
     jaws_alternate: bool,
-    last_asteroid_killed_at: Option<FutureTime>,
+    next_alien_time: Option<FutureTime>,
     game_started_this_frame: bool,
     audio_state: audio_helper::AudioState,
 
@@ -286,6 +291,8 @@ pub struct GameManagerResource {
     // TODO: Maybe make these a map, so I can have N of them. Or an enum or something.
     player_spawn_when: Option<FutureTime>,
     level_start_when: Option<FutureTime>,
+
+    time_between_aliens: f64,
 }
 
 impl GameManagerResource {
@@ -300,6 +307,9 @@ impl GameManagerResource {
         }
     }
 
+    fn spawn_alien_later( &mut self, time: &Time) {
+        self.next_alien_time = Some(FutureTime::from_now(time, self.time_between_aliens));
+    }
 
     // We need to respawn player "later", so there:
     //  1) aren't two players in one frame (dead and spawned)
@@ -466,12 +476,16 @@ impl GameManagerResource {
         self.level += 1;
         self.jaw_interval_seconds = 0.9f64;
         self.jaws_alternate = true;
-        self.next_jaws_sound_time = Some(FutureTime::from_now(time, 1.0f64));
+        self.next_jaws_sound_time = Some(FutureTime::from_now(time, JAWS_SOUND_INTERVAL));
         self.add_asteroids(1 + self.level, commands, textures_resource); // 3.0 + Mathf.Log( (float) Level)));
-        self.last_asteroid_killed_at = Some(FutureTime::from_now(time, 15.0f64));
-    }
+        self.spawn_alien_later( time);
 
-    fn clear_aliens(&mut self) {}
+        self.time_between_aliens -= ALIEN_INTERVAL_DECREASE;
+        if self.time_between_aliens < MIN_ALIEN_INTERVAL {
+            self.time_between_aliens = MIN_ALIEN_INTERVAL;
+        }
+
+    }
 
     fn add_asteroids(
         &mut self,
@@ -681,6 +695,7 @@ fn main() {
             jaw_interval_seconds: 0.9f64,
             jaws_alternate: false,
             next_jaws_sound_time: None,
+            time_between_aliens: ALIEN_INTERVAL,
             ..Default::default()
         })
         .insert_resource(TexturesResource {
@@ -1578,7 +1593,7 @@ fn alien_collision_system(
             );
 
             // Treat killing an alien, like killing an asteroid.
-            game_manager.last_asteroid_killed_at = Some(FutureTime::now(&time));
+            game_manager.spawn_alien_later(&time);
 
         }
     }
@@ -1635,7 +1650,7 @@ fn asteroid_collision_system(
                     }
                 }
                 spawn_asteroid_or_alien_explosion(&mut commands, &textures_resource, trans);
-                game_manager.last_asteroid_killed_at = Some(FutureTime::now(&time));
+                game_manager.spawn_alien_later(&time);
 
                 if let Some(size) = replace_size {
                     // Replace with 2 smaller asteroids
@@ -1859,6 +1874,7 @@ fn player_spawn_system(
         if when.is_expired(&time) {
             game_manager.player_spawn_when = None;
             game_manager.respawn_player(&mut commands, &textures_resource);
+            game_manager.spawn_alien_later(&time);
         }
     }
 }
@@ -1894,6 +1910,7 @@ fn make_random_path() -> Path2D {
 fn alien_update_system(
     mut game_manager: ResMut<GameManagerResource>, // Seems like sound should attach to entity and be killed with it.
     audio: Res<Audio>,
+    time: Res<Time>,
     mut aliens_query: Query<(
         &mut AlienComponent,
         &Transform,
@@ -1931,7 +1948,7 @@ fn alien_update_system(
                 &audio,
                 &mut game_manager.audio_state,
             );
-            
+            game_manager.spawn_alien_later(&time);
         }
     } else {
         // Go towards
@@ -1967,7 +1984,7 @@ fn alien_spawn_system(
     textures_resource: Res<TexturesResource>,
 ) {
     if game_manager.state == State::Playing && other_aliens_query.iter().count() == 0 {
-        match game_manager.last_asteroid_killed_at {
+        match game_manager.next_alien_time {
             None => {}
             Some(laka) => {
                 let diff = laka.since( &time); //.seconds_since_startup() - laka.seconds_since_startup_to_auto_destroy;
@@ -1981,9 +1998,8 @@ fn alien_spawn_system(
                     }
                 }
 
-                // TODO: Magic numbers
-                if (diff > 8.0f64)
-                    || ast_count < 5
+                if (diff > 0.0f64)
+                    || diff > MIN_ALIEN_INTERVAL && ast_count < MIN_ASTEROID_SPAWN_ALIEN // MAGIC
                         && random_range_u32(0, 1000) > (996 - game_manager.level * 2)
                 {
                     let alien_size = if random_range_u32(0, 3) == 0 {
