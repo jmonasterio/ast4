@@ -1,10 +1,12 @@
 Port of my AST3 asteroids clone to Bevy/Rust from Unity/C#.
 
+You can play it here: [AST4 Game Link](https://jmonasterio.github.io/ast4/)
+
+
 This is my first Rust program. Be gentle.
 
 Still working on it, but actually playable.
 
-You can play it here: [AST4 Game Link](https://jmonasterio.github.io/ast4/)
 
 Link to *old* unity version [old version](https://github.com/jmonasterio/ast3)
 
