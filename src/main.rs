@@ -13,6 +13,7 @@ use bevy_render::camera::{DepthCalculation, ScalingMode, WindowOrigin};
 
 mod audio_helper;
 
+// TODO: Alient shooting.
 // TODO: I want prefabs of aliens, and players, and asteroids. I clone a prefab to instantiate instead of code.
 // See: https://github.com/bevyengine/bevy/issues/1515
 // TODO: Exhaust
@@ -712,23 +713,23 @@ fn main() {
         .add_system_to_stage(DELETE_CLEANUP_STAGE, clear_at_game_start_system)
         .add_system_set(
             SystemSet::new()
-                .with_system(game_over_system)
                 .with_system(player_system)
-                .with_system(wrapped_2d_system)
+                .with_system(alien_update_system)
                 .with_system(velocity_system)
-                .with_system(start_game_system)
+                .with_system(wrapped_2d_system)
                 .with_system(update_ambience_sound_system)
-                .with_system(score_system)
-                .with_system(lives_system)
                 .with_system(collision_system)
                 .with_system(asteroid_collision_system)
                 .with_system(player_collision_system)
                 .with_system(alien_collision_system)
-                .with_system(level_system)
-                .with_system(player_spawn_system)
                 .with_system(update_particles)
+                .with_system(player_spawn_system)
                 .with_system(alien_spawn_system)
-                .with_system(alien_update_system),
+                .with_system(level_system)
+                .with_system(score_system)
+                .with_system(lives_system)
+                .with_system(game_over_system)
+                .with_system(start_game_system),
         );
 
     if built_info::CFG_OS == "windows" {
@@ -1925,7 +1926,6 @@ fn alien_update_system(
     let (mut alien, trans, mut vel, mut dcc) = aliens_query.single_mut();
 
     if dcc.delete_after_frame {
-        assert!( false, "Did not expect this.");
         return;
     }
 
