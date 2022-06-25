@@ -9,7 +9,7 @@ use bevy::{
 };
 use bevy_kira_audio::{Audio, AudioPlugin};
 use bevy_prototype_lyon::prelude::*;
-use bevy_render::camera::{DepthCalculation, ScalingMode, WindowOrigin};
+use bevy_render::camera::{DepthCalculation, ScalingMode, WindowOrigin, OrthographicCameraBundle,Camera2d};
 
 mod audio_helper;
 
@@ -53,6 +53,10 @@ type Path2D = Vec<Vec3>;
 struct FutureTime {
     seconds_since_startup_to_auto_destroy: f64,
 }
+
+// NOTE: I tried making an ADT with all the different event types in it, but then at the end all
+//  the player_collision_system, asteroid_collion_system, etc collapse into a single method, and
+//  then why have the events at all?
 
 struct AsteroidCollisionEvent {
     asteroid: Entity,
@@ -505,7 +509,6 @@ impl GameManagerResource {
         }
     }
 
-    // TODO: Load a mirrored verion of asteroid, so not all the same.
     fn add_asteroid_with_size_at(
         commands: &mut Commands,
         textures_resource: &Res<TexturesResource>,
@@ -558,7 +561,6 @@ impl GameManagerResource {
 
     // TODO
     fn make_safe_asteroid_pos() -> Vec3 {
-        // Todo: Implement
 
         //if (_player1 != null)
         //{
@@ -677,7 +679,7 @@ fn main() {
             title: PROJECT.to_string(),
             width: WIDTH,
             height: HEIGHT,
-            vsync: true,
+            present_mode: bevy_window::PresentMode::Mailbox,
             cursor_visible: false,
             decorations: false, // Hide the white flashing window at atartup
             // mode: bevy_window::WindowMode::BorderlessFullscreen,
@@ -753,9 +755,9 @@ fn main() {
     new_app.run();
 }
 
-pub fn new_camera_2d() -> OrthographicCameraBundle {
+pub fn new_camera_2d() -> OrthographicCameraBundle<Camera2d> {
     let far = 1000.0 - 0.1;
-    let mut camera = OrthographicCameraBundle::new_2d();
+    let mut camera = OrthographicCameraBundle::default();
     camera.orthographic_projection = OrthographicProjection {
         far,
         depth_calculation: DepthCalculation::ZDifference,
