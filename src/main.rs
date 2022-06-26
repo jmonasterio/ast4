@@ -1,4 +1,4 @@
-//#![windows_subsystem = "windows"] // Remove comment to turn off console log output
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                //#![windows_subsystem = "windows"] // Remove comment to turn off console log output
 
 use std::ops::Mul;
 
@@ -7,9 +7,9 @@ use bevy::{
     //ecs::system::SystemParam,
     prelude::*,
 };
-use bevy_kira_audio::{Audio, AudioPlugin};
 use bevy_prototype_lyon::prelude::*;
 use bevy_render::camera::{DepthCalculation, ScalingMode, WindowOrigin, OrthographicCameraBundle,Camera2d};
+use bevy::audio::{AudioSink, AudioPlugin};
 
 mod audio_helper;
 
@@ -103,6 +103,11 @@ struct Particle {
     spin: f32,
     fade: f32,
 }
+
+// These are for looped sounds.
+struct ThrustSoundController(Handle<AudioSink>);
+struct SaucerSoundController(Handle<AudioSink>);
+
 
 // Simple particle system updater.
 fn update_particles(
@@ -291,7 +296,6 @@ pub struct GameManagerResource {
     next_alien_time: Option<FutureTime>,
     game_started_this_frame: bool,
     audio_state: audio_helper::AudioState,
-
     // -- Do some work at a future time.
     // TODO: Maybe make these a map, so I can have N of them. Or an enum or something.
     player_spawn_when: Option<FutureTime>,
@@ -366,7 +370,7 @@ impl GameManagerResource {
             })
             .insert(PlayerComponent {
                 thrust: 100.0f32,
-                friction: 0.98f32,
+                friction: 0.90f32,
                 last_hyperspace_time: 0f64,
                 snap_angle: None,
                 angle_increment: (std::f32::consts::PI / 16.0f32),
@@ -757,7 +761,7 @@ fn main() {
 
 pub fn new_camera_2d() -> OrthographicCameraBundle<Camera2d> {
     let far = 1000.0 - 0.1;
-    let mut camera = OrthographicCameraBundle::default();
+    let mut camera = OrthographicCameraBundle::new_2d();
     camera.orthographic_projection = OrthographicProjection {
         far,
         depth_calculation: DepthCalculation::ZDifference,
@@ -1052,11 +1056,13 @@ fn wrapped_2d_system(mut query: Query<(&Wrapped2dComponent, &mut Transform)>) {
 //  events to, e.g. eventStartSound(), eventSpawn
 fn player_system(
     mut commands: Commands,
-    mut game_manager: ResMut<GameManagerResource>,
+    game_manager: ResMut<GameManagerResource>,
     keyboard_input: Res<Input<KeyCode>>,
     textures_resource: Res<TexturesResource>,
     time: Res<Time>,
     audio: Res<Audio>,
+    thrust_sound_controller: Option<Res<ThrustSoundController>>,
+    audio_sinks: Res<Assets<AudioSink>>,
     mut query: Query<(
         &mut PlayerComponent,
         &mut Transform,
@@ -1082,19 +1088,17 @@ fn player_system(
     player.rotate_to_angle_with_snap(&mut player_transform, dir, &time);
 
     if keyboard_input.just_pressed(KeyCode::Up) {
-        // Can't stop looped sounds individually, so one per track.
-        audio_helper::start_looped_sound(
-            &audio_helper::Tracks::Thrust,
-            &audio_helper::Sounds::Thrust,
-            &audio,
-            &mut game_manager.audio_state,
-        );
+
+        // I probably had to duplicate this code bcause of ThrustSoundController
+        if let Some(sound) = game_manager.audio_state.sound_handles.get( &audio_helper::Sounds::Thrust) {
+            let sink = audio.play_with_settings(sound.clone(), PlaybackSettings { repeat: true, ..Default::default() });
+            let sink_handle = audio_sinks.get_handle( sink);
+            commands.insert_resource( ThrustSoundController(sink_handle));
+        }
     } else if keyboard_input.just_released(KeyCode::Up) {
-        audio_helper::stop_looped_sound(
-            &audio_helper::Tracks::Thrust,
-            &audio,
-            &mut game_manager.audio_state,
-        );
+        if let Some(sink) = audio_sinks.get(&thrust_sound_controller.unwrap().0) {
+            sink.stop();
+        }
     }
 
     // Maybe a thruster component? Or maybe Rotator+Thruster=PlayerMover component.
@@ -1126,23 +1130,8 @@ fn player_system(
             },
         );
 
-
-        /*
-        if (_exhaustParticleSystem.isStopped)
-        {
-            _exhaustParticleSystem.loop = true;
-            _exhaustParticleSystem.Play();
-        }
-        */
     } else {
-        velocity.apply_friction(player.friction);
-
-        /* TODO
-        if (_exhaustParticleSystem.isPlaying)
-        {
-            _exhaustParticleSystem.Stop();
-        }
-        */
+        velocity.apply_friction(player.friction); // TODO: This is weird.
     }
 
     if (keyboard_input.just_pressed(KeyCode::LControl)
@@ -1151,12 +1140,9 @@ fn player_system(
     {
         let (_, muzzle_transform) = muzzle_query.single();
 
-        audio_helper::play_single_sound(
-            &audio_helper::Tracks::Game,
-            &audio_helper::Sounds::Fire,
-            &audio,
-            &game_manager.audio_state,
-        );
+        if let Some(sound) = game_manager.audio_state.sound_handles.get( &audio_helper::Sounds::Fire) {
+            audio.play(sound.clone());
+        }
 
         commands
             .spawn_bundle(SpriteSheetBundle {
@@ -1310,12 +1296,9 @@ fn score_system(
         game_manager.next_free_life_score += FREE_USER_AT;
         game_manager.lives += 1;
 
-        audio_helper::play_single_sound(
-            &audio_helper::Tracks::Game,
-            &audio_helper::Sounds::ExtraShip,
-            &audio,
-            &game_manager.audio_state,
-        );
+        if let Some(sound) = game_manager.audio_state.sound_handles.get( &audio_helper::Sounds::ExtraShip) {
+            audio.play(sound.clone());
+        }
     }
 }
 
@@ -1384,20 +1367,13 @@ fn update_ambience_sound_system(
             &time,
             game_manager.jaw_interval_seconds,
         ));
-        if game_manager.jaws_alternate {
-            audio_helper::play_single_sound(
-                &audio_helper::Tracks::Ambience,
-                &audio_helper::Sounds::Beat1,
-                &audio,
-                &game_manager.audio_state,
-            );
-        } else {
-            audio_helper::play_single_sound(
-                &audio_helper::Tracks::Ambience,
-                &audio_helper::Sounds::Beat2,
-                &audio,
-                &game_manager.audio_state,
-            );
+        let sound_handle = (if game_manager.jaws_alternate {
+            &audio_helper::Sounds::Beat1 } else {
+                &audio_helper::Sounds::Beat2
+            });
+
+        if let Some(sound) = game_manager.audio_state.sound_handles.get( sound_handle ) {
+            audio.play(sound.clone());
         }
         game_manager.jaws_alternate = !game_manager.jaws_alternate;
     }
@@ -1572,28 +1548,27 @@ fn alien_collision_system(
     textures_resource: Res<TexturesResource>,
     audio: Res<Audio>,
     time: Res<Time>,
+    saucer_sound_controller: Option<Res<SaucerSoundController>>,
+    audio_sinks: Res<Assets<AudioSink>>,
 ) {
     for ev in ev_collision.iter() {
         // This is pretty inefficient.
         if let Ok((_, mut dcc, trans)) = query.get_mut(ev.alien) {
             dcc.delete_after_frame = true;
 
-            audio_helper::play_single_sound(
-                &audio_helper::Tracks::Game,
-                &audio_helper::Sounds::BangSmall,
-                &audio,
-                &game_manager.audio_state,
-            );
+            if let Some(sound) = game_manager.audio_state.sound_handles.get( &audio_helper::Sounds::BangSmall) {
+                audio.play(sound.clone());
+            }
 
             spawn_asteroid_or_alien_explosion( &mut commands, &textures_resource, &trans);
 
             // Stop alien sound
             println!("Stop looped sound");
-            audio_helper::stop_looped_sound(
-                &audio_helper::Tracks::Saucers,
-                &audio,
-                &mut game_manager.audio_state,
-            );
+            if let Some(ssc) = &saucer_sound_controller {
+                if let Some(sink) = audio_sinks.get(&ssc.0) {
+                    sink.stop();
+                }
+            }
 
             // Treat killing an alien, like killing an asteroid.
             game_manager.spawn_alien_later(&time);
@@ -1629,13 +1604,10 @@ fn asteroid_collision_system(
                 }
                 dcc.delete_after_frame = true;
 
-                audio_helper::play_single_sound(
-                    &audio_helper::Tracks::Game,
-                    &audio_helper::Sounds::BangLarge,
-                    &audio,
-                    &game_manager.audio_state,
-                );
-
+                if let Some(sound) = game_manager.audio_state.sound_handles.get( &audio_helper::Sounds::BangLarge) {
+                    audio.play(sound.clone());
+                }
+    
                 let mut replace_size: Option<AsteroidSize> = None;
                 match ast.size {
                     AsteroidSize::Large => {
@@ -1692,18 +1664,17 @@ fn player_collision_system(
     textures_resource: Res<TexturesResource>,
     time: Res<Time>,
     audio: Res<Audio>,
+    thrust_sound_controller: Option<Res<ThrustSoundController>>,
+    audio_sinks: Res<Assets<AudioSink>>,
 ) {
     for ev in ev_collision.iter() {
         // This is pretty inefficient.
         if let Ok((_, mut dcc, trans)) = query.get_mut(ev.player) {
             dcc.delete_after_frame = true;
 
-            audio_helper::play_single_sound(
-                &audio_helper::Tracks::Game,
-                &audio_helper::Sounds::BangSmall,
-                &audio,
-                &game_manager.audio_state,
-            );
+            if let Some(sound) = game_manager.audio_state.sound_handles.get( &audio_helper::Sounds::BangSmall) {
+                audio.play(sound.clone());
+            }
 
             // Create an explosion for player.
             create_particles(
@@ -1726,12 +1697,13 @@ fn player_collision_system(
 
             // STOP thrust sound when player_killed
             // Need to do this better.
-            audio_helper::stop_looped_sound(
-                &audio_helper::Tracks::Thrust,
-                &audio,
-                &mut game_manager.audio_state,
-            );
+            if let Some(tsc) = &thrust_sound_controller {
 
+                if let Some(sink) = audio_sinks.get(&tsc.0) {
+                    sink.stop();
+                }
+            }
+            
             // Delete lifes
             game_manager.player_killed(&time);
         }
@@ -1912,8 +1884,9 @@ fn make_random_path() -> Path2D {
 
 fn alien_update_system(
     mut game_manager: ResMut<GameManagerResource>, // Seems like sound should attach to entity and be killed with it.
-    audio: Res<Audio>,
     time: Res<Time>,
+    saucer_sound_controller: Option<Res<SaucerSoundController>>,
+    audio_sinks: Res<Assets<AudioSink>>,
     mut aliens_query: Query<(
         &mut AlienComponent,
         &Transform,
@@ -1945,11 +1918,9 @@ fn alien_update_system(
 
             // Stop alien sound
             println!("Stop looped sound");
-            audio_helper::stop_looped_sound(
-                &audio_helper::Tracks::Saucers,
-                &audio,
-                &mut game_manager.audio_state,
-            );
+            if let Some(sink) = audio_sinks.get(&saucer_sound_controller.unwrap().0) {
+                sink.stop();
+            }
             game_manager.spawn_alien_later(&time);
         }
     } else {
@@ -1978,12 +1949,13 @@ fn alien_update_system(
 
 fn alien_spawn_system(
     mut commands: Commands,
-    mut game_manager: ResMut<GameManagerResource>,
+    game_manager: ResMut<GameManagerResource>,
     other_aliens_query: Query<&AlienComponent>,
     asteroids_query: Query<&AsteroidComponent>,
     time: Res<Time>,
     audio: Res<Audio>,
     textures_resource: Res<TexturesResource>,
+    audio_sinks: Res<Assets<AudioSink>>,
 ) {
     if game_manager.state == State::Playing && other_aliens_query.iter().count() == 0 {
         match game_manager.next_alien_time {
@@ -2060,20 +2032,22 @@ fn alien_spawn_system(
                             delete_after_frame: false,
                             auto_destroy_enabled: false,
                             ..Default::default()
-                        })
-                        .id();
+                        });
 
-                    // Wouldn't it be cool if the alien knew it was spawned and played its own sound.
-                    audio_helper::start_looped_sound(
-                        &audio_helper::Tracks::Saucers,
-                        &(if alien_size == AlienSize::Small {
-                            audio_helper::Sounds::SaucerSmall
-                        } else {
-                            audio_helper::Sounds::SaucerBig
-                        }),
-                        &audio,
-                        &mut game_manager.audio_state,
-                    );
+                    // TBD: Wouldn't it be cool if the alien knew it was spawned and played its own sound.
+
+                    // I probably had to duplicate this code bcause of ThrustSoundController
+                    let snd = &(if alien_size == AlienSize::Small {
+                        audio_helper::Sounds::SaucerSmall
+                    } else {
+                        audio_helper::Sounds::SaucerBig
+                    });
+
+                    if let Some(sound) = game_manager.audio_state.sound_handles.get( snd) {
+                        let sink = audio.play_with_settings(sound.clone(), PlaybackSettings { repeat: true, ..Default::default() });
+                        let sink_handle = audio_sinks.get_handle( sink);
+                        commands.insert_resource( SaucerSoundController(sink_handle));
+                    }
                 }
             }
         }

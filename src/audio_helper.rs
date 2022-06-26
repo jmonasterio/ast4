@@ -1,7 +1,5 @@
-// TODO: I think this should be my own audio plugin that wraps kira.
 use crate::GameManagerResource;
 use bevy::prelude::*;
-use bevy_kira_audio::{Audio, AudioChannel, AudioSource};
 use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Eq, Hash)]
@@ -18,123 +16,21 @@ pub enum Sounds {
     Thrust,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub enum Tracks {
-    Game, /* Fire, Bangs, Extraship */
-    // TODO: Fire and bang may want to be on right/left/center tracks.
-    Thrust,   /* Looping */
-    Ambience, /* Looping, beat */
-    Saucers,  /* Looping */
-}
-
-impl std::fmt::Display for Tracks {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-        // or, alternatively:
-        // fmt::Debug::fmt(self, f)
-    }
-}
-
 #[derive(Default)]
 pub struct AudioState {
-    audio_loaded: bool,
+    pub audio_loaded: bool,
     //loop_handle: Handle<AudioSource>,
-    sound_handles: HashMap<Sounds, Handle<AudioSource>>,
-
-    // Tracks/channel. For now, we don't need to keep data about each channel (ChannelAudioState)
-    audio_tracks: HashMap<Tracks, ChannelAudioState>,
-}
-#[derive(Default, Clone)]
-struct ChannelAudioState {
-    channel: AudioChannel,
-    loop_started: bool,
-}
-
-pub fn start_looped_sound(
-    track: &Tracks,
-    sound: &Sounds,
-    audio: &Res<Audio>,
-    audio_state: &mut AudioState,
-) {
-    if !audio_state.audio_loaded {
-        return;
-    }
-
-    // TODO: This seems so sketch. Do I have to clone handle, even if not going to use?
-    if let Some(sound) = audio_state.sound_handles.get(sound) {
-        let handle = sound.clone();
-        let cas = audio_state.audio_tracks.get_mut(track).unwrap();
-        if !cas.loop_started {
-            audio.play_looped_in_channel(handle, &cas.channel);
-            cas.loop_started = true;
-        }
-    }
-}
-
-pub fn stop_looped_sound(track: &Tracks, audio: &Res<Audio>, audio_state: &mut AudioState) {
-    if let Some(mut cas) = audio_state.audio_tracks.get_mut(track) {
-        if cas.loop_started {
-            audio.stop_channel(&cas.channel);
-            cas.loop_started = false;
-        }
-    }
-}
-
-pub fn play_single_sound(
-    track: &Tracks,
-    sound: &Sounds,
-    audio: &Res<Audio>,
-    audio_state: &AudioState,
-) {
-    if !audio_state.audio_loaded {
-        return;
-    }
-    let cas = audio_state.audio_tracks.get(track).unwrap(); // Get first channel.
-    audio.play_in_channel(
-        audio_state.sound_handles.get(sound).unwrap().clone(),
-        &cas.channel,
-    );
+    pub sound_handles: HashMap<Sounds, Handle<AudioSource>>,
 }
 
 pub fn prepare_audio(asset_server: &Res<AssetServer>) -> AudioState {
     let mut audio_state = AudioState {
         audio_loaded: false,
         //loop_handle,•        sound_handles: HashMap::new(),
-        audio_tracks: HashMap::new(),
+        sound_handles: HashMap::new(),
 
         ..Default::default()
     };
-
-    audio_state.audio_tracks.insert(
-        Tracks::Game,
-        ChannelAudioState {
-            channel: AudioChannel::new(Tracks::Game.to_string()),
-            loop_started: false,
-        },
-    );
-
-    audio_state.audio_tracks.insert(
-        Tracks::Ambience,
-        ChannelAudioState {
-            channel: AudioChannel::new(Tracks::Ambience.to_string()),
-            loop_started: false,
-        },
-    );
-
-    audio_state.audio_tracks.insert(
-        Tracks::Saucers,
-        ChannelAudioState {
-            channel: AudioChannel::new(Tracks::Saucers.to_string()),
-            loop_started: false,
-        },
-    );
-    audio_state.audio_tracks.insert(
-        Tracks::Thrust,
-        ChannelAudioState {
-            channel: AudioChannel::new(Tracks::Thrust.to_string()),
-            loop_started: false,
-        },
-    );
 
     audio_state
         .sound_handles

@@ -26,16 +26,6 @@ instant="0.1"
 
 quadtree_rs="0.1.2"
 
-[dependencies.bevy_kira_audio]
-version = "0.10.0"
-# `ogg` format support is enabled by default, disable if you don't want it
-default-features = false
-# enable the features you care about
-features = [
-  "wav",
- 
-]
-
 # Dependencies for WASM only.
 #[target.'cfg(target_arch = "wasm32")'.dependencies]
 #bevy = { version = "0.6", default-features = false, features = ["bevy_gltf", "bevy_winit", "render", "png"] }
