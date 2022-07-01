@@ -370,7 +370,7 @@ impl GameManagerResource {
             })
             .insert(PlayerComponent {
                 thrust: 100.0f32,
-                friction: 0.90f32,
+                friction: 0.999f32, /* 1-0.02 */
                 last_hyperspace_time: 0f64,
                 snap_angle: None,
                 angle_increment: (std::f32::consts::PI / 16.0f32),
@@ -1131,7 +1131,7 @@ fn player_system(
         );
 
     } else {
-        velocity.apply_friction(player.friction); // TODO: This is weird.
+        velocity.apply_friction( 1.0f32 - player.friction * time.delta_seconds() ); // TODO: This is weird.
     }
 
     if (keyboard_input.just_pressed(KeyCode::LControl)
@@ -1373,7 +1373,7 @@ fn update_ambience_sound_system(
             });
 
         if let Some(sound) = game_manager.audio_state.sound_handles.get( sound_handle ) {
-            audio.play(sound.clone());
+            audio.play_with_settings(sound.clone(), PlaybackSettings::ONCE.with_speed(0.25f32));
         }
         game_manager.jaws_alternate = !game_manager.jaws_alternate;
     }

@@ -47,7 +47,7 @@ pub fn prepare_audio(asset_server: &Res<AssetServer>) -> AudioState {
         .insert(Sounds::BangSmall, asset_server.load("sounds/bangSmall.wav"));
     audio_state
         .sound_handles
-        .insert(Sounds::Beat1, asset_server.load("sounds/beat1.wav"));
+        .insert(Sounds::Beat1, asset_server.load("sounds/beat1.ogg"));
     audio_state
         .sound_handles
         .insert(Sounds::Beat2, asset_server.load("sounds/beat2.wav"));
