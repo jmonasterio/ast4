@@ -49,20 +49,28 @@ export interface InitOutput {
   readonly wgpu_render_bundle_set_push_constants: (a: number, b: number, c: number, d: number, e: number) => void;
   readonly wgpu_render_bundle_pop_debug_group: (a: number) => void;
   readonly wgpu_render_bundle_insert_debug_marker: (a: number, b: number) => void;
-  readonly wgpu_render_bundle_push_debug_group: (a: number, b: number) => void;
   readonly wgpu_render_pass_execute_bundles: (a: number, b: number, c: number) => void;
+  readonly wgpu_render_bundle_push_debug_group: (a: number, b: number) => void;
   readonly __wbindgen_malloc: (a: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number) => number;
   readonly __wbindgen_export_2: WebAssembly.Table;
-  readonly _dyn_core__ops__function__FnMut_____Output___R_as_wasm_bindgen__closure__WasmClosure___describe__invoke__h52710edadb452dd2: (a: number, b: number) => void;
-  readonly _dyn_core__ops__function__FnMut__A____Output___R_as_wasm_bindgen__closure__WasmClosure___describe__invoke__h1ae65053d01199e8: (a: number, b: number, c: number) => void;
-  readonly _dyn_core__ops__function__FnMut_____Output___R_as_wasm_bindgen__closure__WasmClosure___describe__invoke__h8874ed3c30610860: (a: number, b: number) => void;
-  readonly _dyn_core__ops__function__FnMut_____Output___R_as_wasm_bindgen__closure__WasmClosure___describe__invoke__hdfb2428c63691745: (a: number, b: number) => void;
-  readonly _dyn_core__ops__function__FnMut__A____Output___R_as_wasm_bindgen__closure__WasmClosure___describe__invoke__h2c934895568a3a80: (a: number, b: number, c: number) => void;
+  readonly _dyn_core__ops__function__FnMut__A____Output___R_as_wasm_bindgen__closure__WasmClosure___describe__invoke__h12ed5c96510f0912: (a: number, b: number, c: number) => void;
+  readonly _dyn_core__ops__function__FnMut_____Output___R_as_wasm_bindgen__closure__WasmClosure___describe__invoke__h4fc6784cdf0908ca: (a: number, b: number) => void;
+  readonly _dyn_core__ops__function__FnMut_____Output___R_as_wasm_bindgen__closure__WasmClosure___describe__invoke__h45deecf8227a006a: (a: number, b: number) => void;
+  readonly _dyn_core__ops__function__FnMut__A____Output___R_as_wasm_bindgen__closure__WasmClosure___describe__invoke__h2f4a29fa32e0f046: (a: number, b: number, c: number) => void;
   readonly __wbindgen_free: (a: number, b: number) => void;
   readonly __wbindgen_exn_store: (a: number) => void;
   readonly __wbindgen_start: () => void;
 }
+
+/**
+* Synchronously compiles the given `bytes` and instantiates the WebAssembly module.
+*
+* @param {BufferSource} bytes
+*
+* @returns {InitOutput}
+*/
+export function initSync(bytes: BufferSource): InitOutput;
 
 /**
 * If `module_or_path` is {RequestInfo} or {URL}, makes a request and
